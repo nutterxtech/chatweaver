@@ -67,19 +67,43 @@ export default function AuthPage() {
       password: data.password,
     });
 
-    if (error || !authData.user) {
+    if (error) {
       setLoading(false);
-      toast({ title: "Registration failed", description: error?.message ?? "Unknown error", variant: "destructive" });
+      // Give a friendly message for the most common errors
+      let description = error.message;
+      if (error.message.includes("rate limit") || error.message.includes("429")) {
+        description = "Too many sign-up attempts. Please wait a few minutes and try again, or disable email confirmation in your Supabase Auth settings.";
+      } else if (error.message.includes("already registered")) {
+        description = "This email is already registered. Try signing in instead.";
+      }
+      toast({ title: "Registration failed", description, variant: "destructive" });
       return;
     }
 
-    // Insert into users table
+    if (!authData.user) {
+      setLoading(false);
+      toast({ title: "Registration failed", description: "No user returned. Please try again.", variant: "destructive" });
+      return;
+    }
+
+    // If email confirmation is required, session will be null — inform the user
+    if (!authData.session) {
+      setLoading(false);
+      toast({
+        title: "Check your email",
+        description: "A confirmation link has been sent to " + data.email + ". Click it to activate your account.",
+      });
+      return;
+    }
+
+    // Insert into users table (password field kept as placeholder — auth is handled by Supabase Auth)
     const { error: userError } = await supabase.from("users").insert({
       id: authData.user.id,
       name: data.name,
       username: data.username,
       email: data.email,
       phone: data.phone,
+      password: "supabase_auth", // placeholder — real auth uses Supabase Auth, not this field
       status: "Hey there! I am using WhatsChat.",
       friends: [],
       friend_requests: [],
@@ -88,7 +112,7 @@ export default function AuthPage() {
 
     setLoading(false);
     if (userError) {
-      toast({ title: "Profile error", description: userError.message, variant: "destructive" });
+      toast({ title: "Profile setup error", description: userError.message, variant: "destructive" });
     } else {
       toast({ title: "Welcome!", description: "Account created successfully." });
     }
