@@ -10,6 +10,7 @@ interface AuthContextType {
   loading: boolean;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  deleteAccount: () => Promise<{ error?: string }>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -66,8 +67,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   };
 
+  const deleteAccount = async (): Promise<{ error?: string }> => {
+    if (!user) return { error: "Not authenticated" };
+    // Remove user from all conversations (update participants arrays)
+    const { data: convs } = await supabase
+      .from("conversations")
+      .select("id, participants")
+      .contains("participants", [user.id]);
+
+    if (convs) {
+      for (const conv of convs) {
+        const updated = conv.participants.filter((id: string) => id !== user.id);
+        if (updated.length === 0) {
+          await supabase.from("conversations").delete().eq("id", conv.id);
+        } else {
+          await supabase.from("conversations").update({ participants: updated }).eq("id", conv.id);
+        }
+      }
+    }
+
+    // Delete user row
+    const { error: delErr } = await supabase.from("users").delete().eq("id", user.id);
+    if (delErr) return { error: delErr.message };
+
+    // Sign out (Supabase Auth user deletion requires service role — sign out is sufficient for client)
+    await supabase.auth.signOut();
+    return {};
+  };
+
   return (
-    <AuthContext.Provider value={{ session, user, dbUser, loading, signOut, refreshUser }}>
+    <AuthContext.Provider value={{ session, user, dbUser, loading, signOut, refreshUser, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );
