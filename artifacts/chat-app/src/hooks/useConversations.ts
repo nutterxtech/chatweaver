@@ -50,8 +50,9 @@ export function useConversations() {
   useEffect(() => {
     fetchConversations();
 
+    const channelName = `convs-${user?.id}-${Date.now()}`;
     const channel = supabase
-      .channel("convs-realtime-" + user?.id)
+      .channel(channelName)
       .on("postgres_changes", {
         event: "*",
         schema: "public",

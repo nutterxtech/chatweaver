@@ -77,9 +77,10 @@ export function useMessages(conversationId: string | null) {
     if (!conversationId) { setMessages([]); return; }
     fetchMessages();
 
-    // Real-time message subscription
+    // Real-time message subscription — unique name prevents "already subscribed" error
+    const ts = Date.now();
     const msgChannel = supabase
-      .channel(`msgs-${conversationId}`)
+      .channel(`msgs-${conversationId}-${ts}`)
       .on("postgres_changes", {
         event: "INSERT",
         schema: "public",
@@ -106,9 +107,9 @@ export function useMessages(conversationId: string | null) {
       })
       .subscribe();
 
-    // Typing via broadcast (no DB table needed)
+    // Typing via broadcast — unique name prevents "already subscribed" error
     const typingChannel = supabase
-      .channel(`typing-bc-${conversationId}`)
+      .channel(`typing-bc-${conversationId}-${ts}`)
       .on("broadcast", { event: "typing" }, async ({ payload }) => {
         if (!payload?.userId || payload.userId === user?.id) return;
         // Fetch user if not cached
