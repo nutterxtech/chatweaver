@@ -1,17 +1,15 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
-import type { Database } from "@/lib/database.types";
-
-type Profile = Database["public"]["Tables"]["profiles"]["Row"];
+import type { DBUser } from "@/lib/database.types";
 
 interface AuthContextType {
   session: Session | null;
   user: User | null;
-  profile: Profile | null;
+  dbUser: DBUser | null;
   loading: boolean;
   signOut: () => Promise<void>;
-  refreshProfile: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -19,56 +17,57 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [dbUser, setDbUser] = useState<DBUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchProfile = async (userId: string) => {
-    const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
-    setProfile(data);
+  const fetchDbUser = async (userId: string) => {
+    const { data } = await supabase.from("users").select("*").eq("id", userId).single();
+    setDbUser(data);
   };
 
-  const refreshProfile = async () => {
-    if (user) await fetchProfile(user.id);
+  const refreshUser = async () => {
+    if (user) await fetchDbUser(user.id);
   };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.user) fetchProfile(session.user.id).finally(() => setLoading(false));
-      else setLoading(false);
+      if (session?.user) {
+        fetchDbUser(session.user.id).finally(() => setLoading(false));
+      } else {
+        setLoading(false);
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
-      if (session?.user) fetchProfile(session.user.id);
-      else setProfile(null);
+      if (session?.user) fetchDbUser(session.user.id);
+      else setDbUser(null);
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
+  // Mark online/offline
   useEffect(() => {
     if (!user) return;
-    supabase.from("profiles").update({ is_online: true, last_seen: new Date().toISOString() }).eq("id", user.id);
+    supabase.from("users").update({ last_seen: new Date().toISOString() }).eq("id", user.id);
 
-    const handleBeforeUnload = () => {
-      supabase.from("profiles").update({ is_online: false, last_seen: new Date().toISOString() }).eq("id", user.id);
+    const handleUnload = () => {
+      supabase.from("users").update({ last_seen: new Date().toISOString() }).eq("id", user.id);
     };
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("beforeunload", handleUnload);
+    return () => window.removeEventListener("beforeunload", handleUnload);
   }, [user]);
 
   const signOut = async () => {
-    if (user) {
-      await supabase.from("profiles").update({ is_online: false, last_seen: new Date().toISOString() }).eq("id", user.id);
-    }
     await supabase.auth.signOut();
   };
 
   return (
-    <AuthContext.Provider value={{ session, user, profile, loading, signOut, refreshProfile }}>
+    <AuthContext.Provider value={{ session, user, dbUser, loading, signOut, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

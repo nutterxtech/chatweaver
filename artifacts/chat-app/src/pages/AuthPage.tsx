@@ -12,9 +12,10 @@ const loginSchema = z.object({
 });
 
 const registerSchema = z.object({
-  display_name: z.string().min(2, "Name must be at least 2 characters"),
+  name: z.string().min(2, "Name must be at least 2 characters"),
+  username: z.string().min(3, "Username must be at least 3 characters").regex(/^[a-z0-9_]+$/, "Only lowercase letters, numbers, underscores"),
   email: z.string().email("Invalid email"),
-  phone: z.string().min(7, "Invalid phone number").regex(/^\+?[0-9\s\-()]+$/, "Invalid phone format"),
+  phone: z.string().min(7, "Invalid phone number").regex(/^\+?[0-9\s\-()+]+$/, "Invalid phone format"),
   password: z.string().min(6, "Password must be at least 6 characters"),
   confirm_password: z.string(),
 }).refine(d => d.password === d.confirm_password, { message: "Passwords don't match", path: ["confirm_password"] });
@@ -28,8 +29,14 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
-  const loginForm = useForm<LoginForm>({ resolver: zodResolver(loginSchema), defaultValues: { email: "", password: "" } });
-  const registerForm = useForm<RegisterForm>({ resolver: zodResolver(registerSchema), defaultValues: { display_name: "", email: "", phone: "", password: "", confirm_password: "" } });
+  const loginForm = useForm<LoginForm>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: "", password: "" },
+  });
+  const registerForm = useForm<RegisterForm>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: { name: "", username: "", email: "", phone: "", password: "", confirm_password: "" },
+  });
 
   const handleLogin = async (data: LoginForm) => {
     setLoading(true);
@@ -40,33 +47,50 @@ export default function AuthPage() {
 
   const handleRegister = async (data: RegisterForm) => {
     setLoading(true);
-    const { data: existing } = await supabase.from("profiles").select("id").or(`email.eq.${data.email},phone.eq.${data.phone}`).limit(1);
+
+    // Check uniqueness of email and phone in users table
+    const { data: existing } = await supabase
+      .from("users")
+      .select("id")
+      .or(`email.eq.${data.email},phone.eq.${data.phone},username.eq.${data.username}`)
+      .limit(1);
+
     if (existing?.length) {
       setLoading(false);
-      toast({ title: "Account exists", description: "Email or phone already registered.", variant: "destructive" });
+      toast({ title: "Account exists", description: "Email, phone, or username already taken.", variant: "destructive" });
       return;
     }
 
-    const { data: authData, error } = await supabase.auth.signUp({ email: data.email, password: data.password });
+    // Create Supabase auth user
+    const { data: authData, error } = await supabase.auth.signUp({
+      email: data.email,
+      password: data.password,
+    });
+
     if (error || !authData.user) {
       setLoading(false);
       toast({ title: "Registration failed", description: error?.message ?? "Unknown error", variant: "destructive" });
       return;
     }
 
-    const { error: profileError } = await supabase.from("profiles").insert({
+    // Insert into users table
+    const { error: userError } = await supabase.from("users").insert({
       id: authData.user.id,
+      name: data.name,
+      username: data.username,
       email: data.email,
       phone: data.phone,
-      display_name: data.display_name,
-      about: "Hey there! I am using WhatsChat.",
+      status: "Hey there! I am using WhatsChat.",
+      friends: [],
+      friend_requests: [],
+      sent_requests: [],
     });
 
     setLoading(false);
-    if (profileError) {
-      toast({ title: "Profile error", description: profileError.message, variant: "destructive" });
+    if (userError) {
+      toast({ title: "Profile error", description: userError.message, variant: "destructive" });
     } else {
-      toast({ title: "Account created!", description: "Welcome to WhatsChat." });
+      toast({ title: "Welcome!", description: "Account created successfully." });
     }
   };
 
@@ -105,109 +129,63 @@ export default function AuthPage() {
           <div className="p-8">
             {mode === "login" ? (
               <form onSubmit={loginForm.handleSubmit(handleLogin)} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+                <Field label="Email" error={loginForm.formState.errors.email?.message}>
                   <input
                     data-testid="input-email"
                     type="email"
                     {...loginForm.register("email")}
                     placeholder="you@example.com"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#128C7E] text-sm transition"
+                    className={inputCls}
                   />
-                  {loginForm.formState.errors.email && <p className="text-red-500 text-xs mt-1">{loginForm.formState.errors.email.message}</p>}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
+                </Field>
+                <Field label="Password" error={loginForm.formState.errors.password?.message}>
                   <div className="relative">
                     <input
                       data-testid="input-password"
                       type={showPassword ? "text" : "password"}
                       {...loginForm.register("password")}
                       placeholder="••••••••"
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#128C7E] text-sm transition pr-10"
+                      className={inputCls + " pr-10"}
                     />
                     <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-3.5 text-gray-400">
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  {loginForm.formState.errors.password && <p className="text-red-500 text-xs mt-1">{loginForm.formState.errors.password.message}</p>}
-                </div>
-                <button
-                  data-testid="button-submit-login"
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-3 bg-[#128C7E] hover:bg-[#0f7066] text-white font-semibold rounded-xl transition-colors disabled:opacity-60 mt-2"
-                >
+                </Field>
+                <button data-testid="button-submit-login" type="submit" disabled={loading} className={submitCls}>
                   {loading ? "Signing in..." : "Sign In"}
                 </button>
               </form>
             ) : (
               <form onSubmit={registerForm.handleSubmit(handleRegister)} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Full Name</label>
-                  <input
-                    data-testid="input-display-name"
-                    {...registerForm.register("display_name")}
-                    placeholder="Your name"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#128C7E] text-sm transition"
-                  />
-                  {registerForm.formState.errors.display_name && <p className="text-red-500 text-xs mt-1">{registerForm.formState.errors.display_name.message}</p>}
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Full Name" error={registerForm.formState.errors.name?.message}>
+                    <input data-testid="input-name" {...registerForm.register("name")} placeholder="Your name" className={inputCls} />
+                  </Field>
+                  <Field label="Username" error={registerForm.formState.errors.username?.message}>
+                    <input data-testid="input-username" {...registerForm.register("username")} placeholder="@handle" className={inputCls} />
+                  </Field>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
-                  <input
-                    data-testid="input-register-email"
-                    type="email"
-                    {...registerForm.register("email")}
-                    placeholder="you@example.com"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#128C7E] text-sm transition"
-                  />
-                  {registerForm.formState.errors.email && <p className="text-red-500 text-xs mt-1">{registerForm.formState.errors.email.message}</p>}
+                <Field label="Email" error={registerForm.formState.errors.email?.message}>
+                  <input data-testid="input-register-email" type="email" {...registerForm.register("email")} placeholder="you@example.com" className={inputCls} />
+                </Field>
+                <Field label="Phone Number" error={registerForm.formState.errors.phone?.message}>
+                  <input data-testid="input-phone" type="tel" {...registerForm.register("phone")} placeholder="+1 234 567 8900" className={inputCls} />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Password" error={registerForm.formState.errors.password?.message}>
+                    <div className="relative">
+                      <input data-testid="input-register-password" type={showPassword ? "text" : "password"} {...registerForm.register("password")} placeholder="••••••••" className={inputCls + " pr-10"} />
+                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-3.5 text-gray-400">
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </Field>
+                  <Field label="Confirm" error={registerForm.formState.errors.confirm_password?.message}>
+                    <input data-testid="input-confirm-password" type={showPassword ? "text" : "password"} {...registerForm.register("confirm_password")} placeholder="••••••••" className={inputCls} />
+                  </Field>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Phone Number</label>
-                  <input
-                    data-testid="input-phone"
-                    type="tel"
-                    {...registerForm.register("phone")}
-                    placeholder="+1 234 567 8900"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#128C7E] text-sm transition"
-                  />
-                  {registerForm.formState.errors.phone && <p className="text-red-500 text-xs mt-1">{registerForm.formState.errors.phone.message}</p>}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
-                  <div className="relative">
-                    <input
-                      data-testid="input-register-password"
-                      type={showPassword ? "text" : "password"}
-                      {...registerForm.register("password")}
-                      placeholder="••••••••"
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#128C7E] text-sm transition pr-10"
-                    />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-3.5 text-gray-400">
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  {registerForm.formState.errors.password && <p className="text-red-500 text-xs mt-1">{registerForm.formState.errors.password.message}</p>}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Confirm Password</label>
-                  <input
-                    data-testid="input-confirm-password"
-                    type={showPassword ? "text" : "password"}
-                    {...registerForm.register("confirm_password")}
-                    placeholder="••••••••"
-                    className="w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#128C7E] text-sm transition"
-                  />
-                  {registerForm.formState.errors.confirm_password && <p className="text-red-500 text-xs mt-1">{registerForm.formState.errors.confirm_password.message}</p>}
-                </div>
-                <button
-                  data-testid="button-submit-register"
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-3 bg-[#128C7E] hover:bg-[#0f7066] text-white font-semibold rounded-xl transition-colors disabled:opacity-60 mt-2"
-                >
+                <button data-testid="button-submit-register" type="submit" disabled={loading} className={submitCls}>
                   {loading ? "Creating account..." : "Create Account"}
                 </button>
               </form>
@@ -215,6 +193,19 @@ export default function AuthPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+const inputCls = "w-full px-4 py-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#128C7E] text-sm transition";
+const submitCls = "w-full py-3 bg-[#128C7E] hover:bg-[#0f7066] text-white font-semibold rounded-xl transition-colors disabled:opacity-60 mt-2";
+
+function Field({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{label}</label>
+      {children}
+      {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
     </div>
   );
 }

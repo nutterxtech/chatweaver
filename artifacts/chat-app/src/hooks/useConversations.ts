@@ -1,22 +1,12 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Database } from "@/lib/database.types";
+import type { DBUser, DBConversation } from "@/lib/database.types";
 
-type Profile = Database["public"]["Tables"]["profiles"]["Row"];
-type Message = Database["public"]["Tables"]["messages"]["Row"];
-
-export interface ConversationWithDetails {
-  id: string;
-  is_group: boolean;
-  group_name: string | null;
-  group_avatar_url: string | null;
-  created_at: string;
-  updated_at: string;
-  other_user: Profile | null;
-  last_message: Message | null;
+export interface ConversationWithDetails extends DBConversation {
+  other_user: DBUser | null;
+  participants_data: DBUser[];
   unread_count: number;
-  participants: Profile[];
 }
 
 export function useConversations() {
@@ -27,96 +17,33 @@ export function useConversations() {
   const fetchConversations = async () => {
     if (!user) return;
 
-    const { data: participations } = await supabase
-      .from("conversation_participants")
-      .select("conversation_id")
-      .eq("user_id", user.id);
-
-    if (!participations?.length) {
-      setConversations([]);
-      setLoading(false);
-      return;
-    }
-
-    const convIds = participations.map(p => p.conversation_id);
-
-    const { data: convs } = await supabase
+    // Get all conversations where current user is a participant
+    const { data: convs, error } = await supabase
       .from("conversations")
       .select("*")
-      .in("id", convIds)
-      .order("updated_at", { ascending: false });
+      .contains("participants", [user.id])
+      .order("last_message_at", { ascending: false, nullsFirst: false });
 
-    if (!convs) { setLoading(false); return; }
+    if (error || !convs) { setLoading(false); return; }
 
-    const detailed: ConversationWithDetails[] = await Promise.all(
-      convs.map(async (conv) => {
-        const { data: parts } = await supabase
-          .from("conversation_participants")
-          .select("user_id")
-          .eq("conversation_id", conv.id);
+    // Collect all unique participant IDs
+    const allIds = [...new Set(convs.flatMap(c => c.participants))];
+    const { data: users } = await supabase.from("users").select("*").in("id", allIds);
+    const userMap = new Map(users?.map(u => [u.id, u]) ?? []);
 
-        const participantIds = parts?.map(p => p.user_id) ?? [];
-        const otherIds = participantIds.filter(id => id !== user.id);
+    const detailed: ConversationWithDetails[] = convs.map(conv => {
+      const otherIds = conv.participants.filter(id => id !== user.id);
+      const other_user = otherIds.length === 1 ? (userMap.get(otherIds[0]) ?? null) : null;
+      const participants_data = conv.participants.map(id => userMap.get(id)).filter(Boolean) as DBUser[];
+      const unread_count = conv.unread_by?.includes(user.id) ? 1 : 0;
 
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("*")
-          .in("id", participantIds);
+      return { ...conv, other_user, participants_data, unread_count };
+    });
 
-        const otherUser = profiles?.find(p => p.id !== user.id) ?? null;
+    // Filter out admin chats and system conversations
+    const filtered = detailed.filter(c => !c.is_admin_chat);
 
-        const { data: lastMsgs } = await supabase
-          .from("messages")
-          .select("*")
-          .eq("conversation_id", conv.id)
-          .eq("is_deleted", false)
-          .order("created_at", { ascending: false })
-          .limit(1);
-
-        const lastMessage = lastMsgs?.[0] ?? null;
-
-        const { data: myPart } = await supabase
-          .from("conversation_participants")
-          .select("last_read_at")
-          .eq("conversation_id", conv.id)
-          .eq("user_id", user.id)
-          .single();
-
-        let unread_count = 0;
-        if (myPart?.last_read_at) {
-          const { count } = await supabase
-            .from("messages")
-            .select("id", { count: "exact", head: true })
-            .eq("conversation_id", conv.id)
-            .neq("sender_id", user.id)
-            .eq("is_deleted", false)
-            .gt("created_at", myPart.last_read_at);
-          unread_count = count ?? 0;
-        } else {
-          const { count } = await supabase
-            .from("messages")
-            .select("id", { count: "exact", head: true })
-            .eq("conversation_id", conv.id)
-            .neq("sender_id", user.id)
-            .eq("is_deleted", false);
-          unread_count = count ?? 0;
-        }
-
-        return {
-          ...conv,
-          other_user: otherUser,
-          last_message: lastMessage,
-          unread_count,
-          participants: profiles ?? [],
-        };
-      })
-    );
-
-    setConversations(detailed.sort((a, b) => {
-      const aTime = a.last_message?.created_at ?? a.updated_at;
-      const bTime = b.last_message?.created_at ?? b.updated_at;
-      return new Date(bTime).getTime() - new Date(aTime).getTime();
-    }));
+    setConversations(filtered);
     setLoading(false);
   };
 
@@ -124,13 +51,12 @@ export function useConversations() {
     fetchConversations();
 
     const channel = supabase
-      .channel("conversations-realtime")
-      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => {
-        fetchConversations();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "conversation_participants" }, () => {
-        fetchConversations();
-      })
+      .channel("convs-realtime-" + user?.id)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "conversations",
+      }, () => fetchConversations())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };

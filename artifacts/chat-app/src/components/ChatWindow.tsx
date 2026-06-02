@@ -1,11 +1,10 @@
 import { useState, useRef, useEffect } from "react";
-import { Phone, Video, Search, MoreVertical, Send, Paperclip, Image, Smile, X, Reply, Trash2, ChevronDown } from "lucide-react";
+import { Phone, Video, Search, MoreVertical, Send, Paperclip, Image, X, Reply, Trash2, ChevronDown } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMessages, type MessageWithSender } from "@/hooks/useMessages";
 import { useConversations } from "@/hooks/useConversations";
 import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
-import { useToast } from "@/hooks/use-toast";
 
 interface ChatWindowProps {
   conversationId: string;
@@ -14,8 +13,7 @@ interface ChatWindowProps {
 export function ChatWindow({ conversationId }: ChatWindowProps) {
   const { user } = useAuth();
   const { conversations } = useConversations();
-  const { messages, loading, typingUsers, sendMessage, sendFile, deleteMessage, startTyping, stopTyping } = useMessages(conversationId);
-  const { toast } = useToast();
+  const { messages, loading, typingUsers, sendMessage, deleteMessage, startTyping, stopTyping } = useMessages(conversationId);
 
   const [input, setInput] = useState("");
   const [replyTo, setReplyTo] = useState<MessageWithSender | null>(null);
@@ -24,13 +22,25 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const conv = conversations.find(c => c.id === conversationId);
   const otherUser = conv?.other_user;
-  const chatName = conv?.is_group ? conv.group_name : otherUser?.display_name;
-  const chatAvatar = conv?.is_group ? conv.group_avatar_url : otherUser?.avatar_url;
+  const chatName = conv?.is_group ? (conv.group_name ?? "Group") : (otherUser?.name ?? "Unknown");
+  const chatPic = conv?.is_group ? conv.group_photo : otherUser?.profile_picture;
+
+  const isOnline = (lastSeen?: string | null) => {
+    if (!lastSeen) return false;
+    return Date.now() - new Date(lastSeen).getTime() < 5 * 60 * 1000;
+  };
+
+  const statusText = conv?.is_group
+    ? `${conv.participants.length} participants`
+    : otherUser
+      ? isOnline(otherUser.last_seen)
+        ? "online"
+        : `last seen ${formatDistanceToNow(new Date(otherUser.last_seen), { addSuffix: true })}`
+      : "";
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -60,17 +70,6 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
     }
   };
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-      toast({ title: "File too large", description: "Max file size is 10MB", variant: "destructive" });
-      return;
-    }
-    await sendFile(file);
-    e.target.value = "";
-  };
-
   const handleDelete = async (msgId: string) => {
     await deleteMessage(msgId);
     setHoveredId(null);
@@ -90,24 +89,27 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
     return acc;
   }, []);
 
-  const statusText = otherUser
-    ? otherUser.is_online ? "online" : `last seen ${formatDistanceToNow(new Date(otherUser.last_seen), { addSuffix: true })}`
-    : conv?.is_group ? `${conv.participants.length} participants` : "";
-
   return (
     <div className="flex-1 flex flex-col h-full bg-[#efeae2] dark:bg-gray-950 relative">
       {/* Header */}
       <div className="px-4 py-3 bg-[#f0f2f5] dark:bg-gray-900 flex items-center gap-3 border-b border-gray-200 dark:border-gray-800 shadow-sm">
-        <Avatar src={chatAvatar} name={chatName ?? "?"} size="md" online={!conv?.is_group ? otherUser?.is_online : undefined} />
+        <Avatar
+          src={chatPic}
+          name={chatName}
+          size="md"
+          online={!conv?.is_group ? isOnline(otherUser?.last_seen) : undefined}
+        />
         <div className="flex-1 min-w-0">
           <h2 className="font-semibold text-sm text-gray-900 dark:text-white truncate">{chatName}</h2>
-          <p data-testid="status-online" className={`text-xs ${otherUser?.is_online ? "text-[#128C7E]" : "text-gray-500 dark:text-gray-400"}`}>{statusText}</p>
+          <p className={`text-xs ${isOnline(otherUser?.last_seen) && !conv?.is_group ? "text-[#128C7E]" : "text-gray-500 dark:text-gray-400"}`}>
+            {statusText}
+          </p>
         </div>
         <div className="flex items-center gap-1">
-          <button data-testid="button-search-chat" className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400">
+          <button className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400">
             <Search className="w-5 h-5" />
           </button>
-          <button data-testid="button-more" className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400">
+          <button className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400">
             <MoreVertical className="w-5 h-5" />
           </button>
         </div>
@@ -153,9 +155,11 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
                 })}
               </div>
             ))}
+
+            {/* Typing indicator */}
             {typingUsers.length > 0 && (
               <div className="flex items-center gap-2 mt-2">
-                <Avatar src={typingUsers[0].avatar_url} name={typingUsers[0].display_name} size="sm" />
+                <Avatar src={typingUsers[0].profile_picture} name={typingUsers[0].name} size="sm" />
                 <div className="bg-white dark:bg-gray-800 rounded-2xl rounded-bl-none px-4 py-3 shadow-sm">
                   <div className="flex gap-1 items-center">
                     <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
@@ -163,7 +167,7 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
                     <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
                   </div>
                 </div>
-                <span className="text-xs text-gray-500">{typingUsers[0].display_name} is typing...</span>
+                <span className="text-xs text-gray-500">{typingUsers[0].name} is typing...</span>
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -171,7 +175,7 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
         )}
       </div>
 
-      {/* Scroll to bottom button */}
+      {/* Scroll to bottom */}
       {showScrollBtn && (
         <button
           onClick={scrollToBottom}
@@ -185,8 +189,8 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
       {replyTo && (
         <div className="px-4 py-2 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 flex items-center gap-3">
           <div className="flex-1 bg-[#f0f2f5] dark:bg-gray-800 rounded-lg px-3 py-2 border-l-4 border-[#128C7E]">
-            <p className="text-xs font-semibold text-[#128C7E]">{replyTo.sender?.display_name}</p>
-            <p className="text-xs text-gray-600 dark:text-gray-400 truncate">{replyTo.content ?? (replyTo.message_type === "image" ? "📷 Photo" : "📎 File")}</p>
+            <p className="text-xs font-semibold text-[#128C7E]">{replyTo.sender?.name}</p>
+            <p className="text-xs text-gray-600 dark:text-gray-400 truncate">{replyTo.content ?? "Message"}</p>
           </div>
           <button onClick={() => setReplyTo(null)} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
             <X className="w-4 h-4" />
@@ -194,17 +198,16 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
         </div>
       )}
 
-      {/* Input */}
+      {/* Input bar */}
       <div className="px-4 py-3 bg-[#f0f2f5] dark:bg-gray-900 flex items-end gap-3">
         <div className="flex items-center gap-1">
-          <button data-testid="button-attach-file" onClick={() => fileInputRef.current?.click()} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400">
+          <button className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400">
             <Paperclip className="w-5 h-5" />
           </button>
-          <button data-testid="button-attach-image" onClick={() => { if (fileInputRef.current) { fileInputRef.current.accept = "image/*"; fileInputRef.current.click(); } }} className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400">
+          <button className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors text-gray-500 dark:text-gray-400">
             <Image className="w-5 h-5" />
           </button>
         </div>
-        <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileChange} accept="image/*,application/pdf,.doc,.docx,.txt" />
         <div className="flex-1 bg-white dark:bg-gray-800 rounded-2xl flex items-end shadow-sm">
           <textarea
             ref={inputRef}
@@ -245,11 +248,25 @@ interface BubbleProps {
 }
 
 function MessageBubble({ msg, isMe, showAvatar, isConsecutive, isGroup, isHovered, onHover, onReply, onDelete }: BubbleProps) {
-  const { user } = useAuth();
+  const isDeleted = msg.content === null && msg.is_edited;
+  const isSystem = msg.is_system;
+
+  if (isSystem) {
+    return (
+      <div className="flex justify-center my-2">
+        <span className="text-xs bg-[#d9fdd3] dark:bg-[#005c4b]/40 text-gray-600 dark:text-gray-300 px-3 py-1 rounded-full shadow-sm max-w-xs text-center">
+          {msg.content}
+        </span>
+      </div>
+    );
+  }
 
   const bubbleClass = isMe
     ? "bg-[#dcf8c6] dark:bg-[#005c4b] rounded-2xl rounded-tr-none"
     : "bg-white dark:bg-gray-800 rounded-2xl rounded-tl-none";
+
+  // Check read receipts
+  const isRead = msg.read_by && msg.read_by.length > 1;
 
   return (
     <div
@@ -259,13 +276,13 @@ function MessageBubble({ msg, isMe, showAvatar, isConsecutive, isGroup, isHovere
     >
       {!isMe && (
         <div className="w-8 flex-shrink-0">
-          {showAvatar && <Avatar src={msg.sender?.avatar_url} name={msg.sender?.display_name ?? "?"} size="sm" />}
+          {showAvatar && <Avatar src={msg.sender?.profile_picture} name={msg.sender?.name ?? "?"} size="sm" />}
         </div>
       )}
 
-      <div className={`max-w-[65%] group relative`}>
+      <div className="max-w-[65%] group relative">
         {/* Action buttons */}
-        {isHovered && !msg.is_deleted && (
+        {isHovered && !isDeleted && (
           <div className={`absolute -top-8 ${isMe ? "right-0" : "left-0"} flex items-center gap-1 bg-white dark:bg-gray-800 rounded-full shadow-lg px-2 py-1 z-10`}>
             <button onClick={() => onReply(msg)} className="p-1 hover:text-[#128C7E] text-gray-500 transition-colors">
               <Reply className="w-3.5 h-3.5" />
@@ -279,40 +296,41 @@ function MessageBubble({ msg, isMe, showAvatar, isConsecutive, isGroup, isHovere
         )}
 
         <div className={`px-3 py-2 shadow-sm ${bubbleClass}`}>
+          {/* Sender name in groups */}
           {isGroup && !isMe && showAvatar && (
-            <p className="text-xs font-semibold text-[#128C7E] mb-1">{msg.sender?.display_name}</p>
+            <p className="text-xs font-semibold text-[#128C7E] mb-1">{msg.sender?.name}</p>
           )}
 
           {/* Reply preview */}
-          {msg.reply_to && (
+          {msg.reply_to_message && (
             <div className="mb-2 bg-black/5 dark:bg-white/10 rounded-lg px-2 py-1.5 border-l-2 border-[#128C7E]">
-              <p className="text-xs font-semibold text-[#128C7E]">{msg.reply_to.sender?.display_name}</p>
-              <p className="text-xs text-gray-600 dark:text-gray-300 truncate">{msg.reply_to.content ?? "📷 Media"}</p>
+              <p className="text-xs font-semibold text-[#128C7E]">{msg.reply_to_message.sender?.name}</p>
+              <p className="text-xs text-gray-600 dark:text-gray-300 truncate">{msg.reply_to_message.content ?? "Message"}</p>
             </div>
           )}
 
-          {msg.is_deleted ? (
+          {/* Audio message */}
+          {msg.audio_url ? (
+            <audio controls src={msg.audio_url} className="max-w-[200px] h-8" />
+          ) : isDeleted ? (
             <p className="text-sm italic text-gray-400">This message was deleted</p>
-          ) : msg.message_type === "image" && msg.file_url ? (
-            <div className="rounded-lg overflow-hidden max-w-xs">
-              <img src={msg.file_url} alt="Image" className="w-full max-h-60 object-cover cursor-pointer hover:opacity-95 transition-opacity" onClick={() => window.open(msg.file_url!, "_blank")} />
-            </div>
-          ) : msg.message_type === "file" ? (
-            <a href={msg.file_url ?? "#"} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400 hover:underline">
-              <Paperclip className="w-4 h-4 flex-shrink-0" />
-              <span className="truncate max-w-[180px]">{msg.file_name}</span>
-              {msg.file_size && <span className="text-xs text-gray-400 flex-shrink-0">({(msg.file_size / 1024).toFixed(0)}KB)</span>}
-            </a>
           ) : (
             <p className="text-sm text-gray-900 dark:text-white whitespace-pre-wrap break-words">{msg.content}</p>
           )}
 
+          {msg.is_edited && !isDeleted && (
+            <span className="text-[10px] text-gray-400 ml-1">(edited)</span>
+          )}
+
+          {/* Timestamp + read receipt */}
           <div className={`flex items-center gap-1 mt-1 ${isMe ? "justify-end" : "justify-end"}`}>
             <span className="text-[10px] text-gray-500 dark:text-gray-400">
               {format(new Date(msg.created_at), "HH:mm")}
             </span>
             {isMe && (
-              <span className="text-[10px] text-[#4FC3F7]">✓✓</span>
+              <span className={`text-[10px] ${isRead ? "text-[#4FC3F7]" : "text-gray-400"}`}>
+                {isRead ? "✓✓" : "✓"}
+              </span>
             )}
           </div>
         </div>

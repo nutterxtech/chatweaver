@@ -1,22 +1,47 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import type { Database } from "@/lib/database.types";
+import type { DBMessage, DBUser } from "@/lib/database.types";
 
-type Message = Database["public"]["Tables"]["messages"]["Row"];
-type Profile = Database["public"]["Tables"]["profiles"]["Row"];
-
-export interface MessageWithSender extends Message {
-  sender: Profile | null;
-  reply_to: MessageWithSender | null;
+export interface MessageWithSender extends DBMessage {
+  sender: DBUser | null;
+  reply_to_message: MessageWithSender | null;
 }
+
+// Simple in-memory typing state (no DB table needed)
+const typingUsers = new Map<string, Map<string, { user: DBUser; expiry: number }>>();
 
 export function useMessages(conversationId: string | null) {
   const { user } = useAuth();
   const [messages, setMessages] = useState<MessageWithSender[]>([]);
   const [loading, setLoading] = useState(false);
-  const [typingUsers, setTypingUsers] = useState<Profile[]>([]);
-  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [typingList, setTypingList] = useState<DBUser[]>([]);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
+  const buildWithSenders = async (rawMessages: DBMessage[]): Promise<MessageWithSender[]> => {
+    const senderIds = [...new Set(rawMessages.map(m => m.sender_id))];
+    const replyIds = rawMessages.filter(m => m.reply_to).map(m => m.reply_to as string);
+    const allIds = [...new Set([...senderIds, ...replyIds])];
+
+    const { data: users } = await supabase.from("users").select("*").in("id", allIds);
+    const userMap = new Map(users?.map(u => [u.id, u]) ?? []);
+
+    let replyMessages: DBMessage[] = [];
+    if (replyIds.length > 0) {
+      const { data } = await supabase.from("messages").select("*").in("id", replyIds);
+      replyMessages = data ?? [];
+    }
+    const replyMap = new Map(replyMessages.map(m => [m.id, m]));
+
+    return rawMessages.map(m => ({
+      ...m,
+      sender: userMap.get(m.sender_id) ?? null,
+      reply_to_message: m.reply_to
+        ? { ...(replyMap.get(m.reply_to) ?? m), sender: userMap.get(replyMap.get(m.reply_to)?.sender_id ?? "") ?? null, reply_to_message: null }
+        : null,
+    }));
+  };
 
   const fetchMessages = async () => {
     if (!conversationId) return;
@@ -30,34 +55,21 @@ export function useMessages(conversationId: string | null) {
 
     if (!data) { setLoading(false); return; }
 
-    const senderIds = [...new Set(data.map(m => m.sender_id))];
-    const { data: profiles } = await supabase.from("profiles").select("*").in("id", senderIds);
-    const profileMap = new Map(profiles?.map(p => [p.id, p]) ?? []);
-
-    const replyIds = data.filter(m => m.reply_to_id).map(m => m.reply_to_id as string);
-    const replyMap = new Map<string, MessageWithSender>();
-    if (replyIds.length > 0) {
-      const { data: replyMsgs } = await supabase.from("messages").select("*").in("id", replyIds);
-      replyMsgs?.forEach(rm => {
-        replyMap.set(rm.id, { ...rm, sender: profileMap.get(rm.sender_id) ?? null, reply_to: null });
-      });
-    }
-
-    const withSenders: MessageWithSender[] = data.map(m => ({
-      ...m,
-      sender: profileMap.get(m.sender_id) ?? null,
-      reply_to: m.reply_to_id ? replyMap.get(m.reply_to_id) ?? null : null,
-    }));
-
+    const withSenders = await buildWithSenders(data);
     setMessages(withSenders);
     setLoading(false);
 
+    // Mark messages as read
     if (user) {
-      await supabase
-        .from("conversation_participants")
-        .update({ last_read_at: new Date().toISOString() })
-        .eq("conversation_id", conversationId)
-        .eq("user_id", user.id);
+      const unread = data.filter(m => m.sender_id !== user.id && !m.read_by?.includes(user.id));
+      for (const msg of unread) {
+        const newReadBy = [...(msg.read_by ?? []), user.id];
+        supabase.from("messages").update({ read_by: newReadBy }).eq("id", msg.id);
+      }
+      // Clear unread flag on conversation
+      supabase.from("conversations")
+        .update({ unread_by: [] })
+        .eq("id", conversationId);
     }
   };
 
@@ -65,31 +77,22 @@ export function useMessages(conversationId: string | null) {
     if (!conversationId) { setMessages([]); return; }
     fetchMessages();
 
+    // Real-time message subscription
     const msgChannel = supabase
-      .channel(`messages-${conversationId}`)
+      .channel(`msgs-${conversationId}`)
       .on("postgres_changes", {
         event: "INSERT",
         schema: "public",
         table: "messages",
         filter: `conversation_id=eq.${conversationId}`,
       }, async (payload) => {
-        const newMsg = payload.new as Message;
-        const { data: profile } = await supabase.from("profiles").select("*").eq("id", newMsg.sender_id).single();
-        let reply_to: MessageWithSender | null = null;
-        if (newMsg.reply_to_id) {
-          const { data: replyMsg } = await supabase.from("messages").select("*").eq("id", newMsg.reply_to_id).single();
-          if (replyMsg) {
-            const { data: replyProfile } = await supabase.from("profiles").select("*").eq("id", replyMsg.sender_id).single();
-            reply_to = { ...replyMsg, sender: replyProfile, reply_to: null };
-          }
-        }
-        setMessages(prev => [...prev, { ...newMsg, sender: profile, reply_to }]);
+        const newMsg = payload.new as DBMessage;
+        const built = await buildWithSenders([newMsg]);
+        setMessages(prev => [...prev, ...built]);
+        // Mark as read if window is open
         if (user && newMsg.sender_id !== user.id) {
-          await supabase
-            .from("conversation_participants")
-            .update({ last_read_at: new Date().toISOString() })
-            .eq("conversation_id", conversationId)
-            .eq("user_id", user.id);
+          const newReadBy = [...(newMsg.read_by ?? []), user.id];
+          supabase.from("messages").update({ read_by: newReadBy }).eq("id", newMsg.id);
         }
       })
       .on("postgres_changes", {
@@ -98,96 +101,84 @@ export function useMessages(conversationId: string | null) {
         table: "messages",
         filter: `conversation_id=eq.${conversationId}`,
       }, (payload) => {
-        const updated = payload.new as Message;
+        const updated = payload.new as DBMessage;
         setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, ...updated } : m));
       })
       .subscribe();
 
+    // Typing via broadcast (no DB table needed)
     const typingChannel = supabase
-      .channel(`typing-${conversationId}`)
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "typing_indicators",
-        filter: `conversation_id=eq.${conversationId}`,
-      }, async () => {
-        const fiveSecsAgo = new Date(Date.now() - 5000).toISOString();
-        const { data } = await supabase
-          .from("typing_indicators")
-          .select("user_id")
-          .eq("conversation_id", conversationId)
-          .neq("user_id", user?.id ?? "")
-          .gt("updated_at", fiveSecsAgo);
+      .channel(`typing-bc-${conversationId}`)
+      .on("broadcast", { event: "typing" }, async ({ payload }) => {
+        if (!payload?.userId || payload.userId === user?.id) return;
+        // Fetch user if not cached
+        const { data: typingUser } = await supabase.from("users").select("*").eq("id", payload.userId).single();
+        if (!typingUser) return;
 
-        if (data?.length) {
-          const { data: profiles } = await supabase.from("profiles").select("*").in("id", data.map(d => d.user_id));
-          setTypingUsers(profiles ?? []);
-        } else {
-          setTypingUsers([]);
-        }
+        if (!typingUsers.has(conversationId)) typingUsers.set(conversationId, new Map());
+        const convTyping = typingUsers.get(conversationId)!;
+        convTyping.set(payload.userId, { user: typingUser, expiry: Date.now() + 4000 });
+        setTypingList([...convTyping.values()].filter(t => t.expiry > Date.now()).map(t => t.user));
+
+        setTimeout(() => {
+          convTyping.delete(payload.userId);
+          setTypingList([...convTyping.values()].filter(t => t.expiry > Date.now()).map(t => t.user));
+        }, 4000);
       })
       .subscribe();
+
+    typingChannelRef.current = typingChannel;
 
     return () => {
       supabase.removeChannel(msgChannel);
       supabase.removeChannel(typingChannel);
+      typingUsers.delete(conversationId);
+      setTypingList([]);
     };
   }, [conversationId, user]);
 
   const sendMessage = async (content: string, replyToId?: string) => {
     if (!conversationId || !user || !content.trim()) return;
+
     await supabase.from("messages").insert({
       conversation_id: conversationId,
       sender_id: user.id,
       content: content.trim(),
-      message_type: "text",
-      reply_to_id: replyToId ?? null,
+      reply_to: replyToId ?? null,
+      read_by: [user.id],
     });
-    await supabase.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", conversationId);
+
+    await supabase.from("conversations").update({
+      last_message: content.trim().slice(0, 100),
+      last_message_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq("id", conversationId);
+
     stopTyping();
   };
 
-  const sendFile = async (file: File) => {
-    if (!conversationId || !user) return;
-    const ext = file.name.split(".").pop();
-    const path = `${conversationId}/${Date.now()}.${ext}`;
-    const { data: uploaded, error } = await supabase.storage.from("chat-media").upload(path, file);
-    if (error || !uploaded) return;
-    const { data: urlData } = supabase.storage.from("chat-media").getPublicUrl(uploaded.path);
-    const isImage = file.type.startsWith("image/");
-    await supabase.from("messages").insert({
-      conversation_id: conversationId,
-      sender_id: user.id,
-      content: null,
-      message_type: isImage ? "image" : "file",
-      file_url: urlData.publicUrl,
-      file_name: file.name,
-      file_size: file.size,
-    });
-    await supabase.from("conversations").update({ updated_at: new Date().toISOString() }).eq("id", conversationId);
-  };
-
   const deleteMessage = async (messageId: string) => {
-    await supabase.from("messages").update({ is_deleted: true, content: null }).eq("id", messageId);
+    await supabase.from("messages").update({
+      content: null,
+      is_edited: true,
+      updated_at: new Date().toISOString(),
+    }).eq("id", messageId);
   };
 
   const startTyping = async () => {
-    if (!conversationId || !user) return;
-    await supabase.from("typing_indicators").upsert(
-      { conversation_id: conversationId, user_id: user.id, updated_at: new Date().toISOString() },
-      { onConflict: "conversation_id,user_id" }
-    );
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(stopTyping, 4000);
+    if (!conversationId || !user || !typingChannelRef.current) return;
+    typingChannelRef.current.send({
+      type: "broadcast",
+      event: "typing",
+      payload: { userId: user.id },
+    });
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(stopTyping, 3500);
   };
 
-  const stopTyping = async () => {
-    if (!conversationId || !user) return;
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    await supabase.from("typing_indicators").delete()
-      .eq("conversation_id", conversationId)
-      .eq("user_id", user.id);
+  const stopTyping = () => {
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
   };
 
-  return { messages, loading, typingUsers, sendMessage, sendFile, deleteMessage, startTyping, stopTyping, refetch: fetchMessages };
+  return { messages, loading, typingUsers: typingList, sendMessage, deleteMessage, startTyping, stopTyping, refetch: fetchMessages };
 }

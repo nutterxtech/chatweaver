@@ -3,86 +3,93 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
 export interface Database {
   public: {
     Tables: {
-      profiles: {
+      users: {
         Row: {
           id: string;
+          name: string;
+          username: string;
           email: string;
           phone: string;
-          display_name: string;
-          avatar_url: string | null;
-          about: string | null;
-          is_online: boolean;
+          password: string;
+          profile_picture: string | null;
+          cover_photo: string | null;
+          is_admin: boolean;
+          status: string | null;
           last_seen: string;
+          friends: string[];
+          friend_requests: string[];
+          sent_requests: string[];
           created_at: string;
           updated_at: string;
+          is_verified: boolean;
         };
         Insert: {
           id: string;
+          name: string;
+          username: string;
           email: string;
           phone: string;
-          display_name: string;
-          avatar_url?: string | null;
-          about?: string | null;
-          is_online?: boolean;
+          password?: string;
+          profile_picture?: string | null;
+          cover_photo?: string | null;
+          is_admin?: boolean;
+          status?: string | null;
           last_seen?: string;
+          friends?: string[];
+          friend_requests?: string[];
+          sent_requests?: string[];
           created_at?: string;
           updated_at?: string;
+          is_verified?: boolean;
         };
         Update: {
-          id?: string;
-          email?: string;
-          phone?: string;
-          display_name?: string;
-          avatar_url?: string | null;
-          about?: string | null;
-          is_online?: boolean;
+          name?: string;
+          username?: string;
+          profile_picture?: string | null;
+          status?: string | null;
           last_seen?: string;
+          friends?: string[];
+          friend_requests?: string[];
+          sent_requests?: string[];
           updated_at?: string;
         };
       };
       conversations: {
         Row: {
           id: string;
+          participants: string[];
+          last_message: string | null;
+          last_message_at: string | null;
+          unread_by: string[];
+          is_admin_chat: boolean;
           is_group: boolean;
           group_name: string | null;
-          group_avatar_url: string | null;
-          created_by: string;
+          group_photo: string | null;
+          admin_id: string | null;
+          invite_token: string | null;
           created_at: string;
           updated_at: string;
+          disappearing_messages: Json | null;
         };
         Insert: {
           id?: string;
+          participants: string[];
+          last_message?: string | null;
+          last_message_at?: string | null;
+          unread_by?: string[];
+          is_admin_chat?: boolean;
           is_group?: boolean;
           group_name?: string | null;
-          group_avatar_url?: string | null;
-          created_by: string;
+          group_photo?: string | null;
+          admin_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
-          is_group?: boolean;
-          group_name?: string | null;
-          group_avatar_url?: string | null;
+          last_message?: string | null;
+          last_message_at?: string | null;
+          unread_by?: string[];
           updated_at?: string;
-        };
-      };
-      conversation_participants: {
-        Row: {
-          id: string;
-          conversation_id: string;
-          user_id: string;
-          joined_at: string;
-          last_read_at: string | null;
-        };
-        Insert: {
-          id?: string;
-          conversation_id: string;
-          user_id: string;
-          joined_at?: string;
-          last_read_at?: string | null;
-        };
-        Update: {
-          last_read_at?: string | null;
         };
       };
       messages: {
@@ -91,84 +98,55 @@ export interface Database {
           conversation_id: string;
           sender_id: string;
           content: string | null;
-          message_type: "text" | "image" | "file" | "audio";
-          file_url: string | null;
-          file_name: string | null;
-          file_size: number | null;
-          reply_to_id: string | null;
-          is_deleted: boolean;
+          is_system: boolean;
+          reply_to: string | null;
+          read_by: string[];
           created_at: string;
           updated_at: string;
+          expires_at: string | null;
+          audio_url: string | null;
+          is_edited: boolean;
         };
         Insert: {
           id?: string;
           conversation_id: string;
           sender_id: string;
           content?: string | null;
-          message_type?: "text" | "image" | "file" | "audio";
-          file_url?: string | null;
-          file_name?: string | null;
-          file_size?: number | null;
-          reply_to_id?: string | null;
-          is_deleted?: boolean;
+          is_system?: boolean;
+          reply_to?: string | null;
+          read_by?: string[];
           created_at?: string;
           updated_at?: string;
+          audio_url?: string | null;
         };
         Update: {
           content?: string | null;
-          is_deleted?: boolean;
+          read_by?: string[];
+          is_edited?: boolean;
           updated_at?: string;
         };
       };
-      message_reads: {
+      notifications: {
         Row: {
           id: string;
-          message_id: string;
-          user_id: string;
-          read_at: string;
-        };
-        Insert: {
-          id?: string;
-          message_id: string;
-          user_id: string;
-          read_at?: string;
-        };
-        Update: Record<string, never>;
-      };
-      typing_indicators: {
-        Row: {
-          id: string;
-          conversation_id: string;
-          user_id: string;
+          recipient_id: string;
+          sender_id: string;
+          type: string;
+          post_id: string | null;
+          content: string | null;
+          read: boolean;
+          created_at: string;
           updated_at: string;
         };
         Insert: {
-          id?: string;
-          conversation_id: string;
-          user_id: string;
-          updated_at?: string;
+          recipient_id: string;
+          sender_id: string;
+          type: string;
+          content?: string | null;
+          read?: boolean;
         };
         Update: {
-          updated_at?: string;
-        };
-      };
-      contacts: {
-        Row: {
-          id: string;
-          user_id: string;
-          contact_id: string;
-          nickname: string | null;
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          contact_id: string;
-          nickname?: string | null;
-          created_at?: string;
-        };
-        Update: {
-          nickname?: string | null;
+          read?: boolean;
         };
       };
     };
@@ -177,3 +155,8 @@ export interface Database {
     Enums: Record<string, never>;
   };
 }
+
+// Convenience aliases
+export type DBUser = Database["public"]["Tables"]["users"]["Row"];
+export type DBConversation = Database["public"]["Tables"]["conversations"]["Row"];
+export type DBMessage = Database["public"]["Tables"]["messages"]["Row"];
