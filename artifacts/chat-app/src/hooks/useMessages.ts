@@ -74,11 +74,11 @@ export function useMessages(conversationId: string | null) {
     if (!conversationId) { setMessages([]); return; }
     fetchMessages();
 
-    const ts = Date.now();
+    const uid = crypto.randomUUID();
 
     // Real-time message subscription
     const msgChannel = supabase
-      .channel(`msgs-${conversationId}-${ts}`)
+      .channel(`msgs-${conversationId}-${uid}`)
       .on("postgres_changes", {
         event: "INSERT",
         schema: "public",
@@ -122,7 +122,7 @@ export function useMessages(conversationId: string | null) {
 
     // Typing via broadcast
     const typingChannel = supabase
-      .channel(`typing-bc-${conversationId}-${ts}`)
+      .channel(`typing-bc-${conversationId}-${uid}`)
       .on("broadcast", { event: "typing" }, async ({ payload }) => {
         if (!payload?.userId || payload.userId === user?.id) return;
         const { data: typingUser } = await supabase.from("users").select("*").eq("id", payload.userId).single();

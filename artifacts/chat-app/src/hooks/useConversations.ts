@@ -50,7 +50,7 @@ export function useConversations() {
   useEffect(() => {
     fetchConversations();
 
-    const channelName = `convs-${user?.id}-${Date.now()}`;
+    const channelName = `convs-${user?.id}-${crypto.randomUUID()}`;
     const channel = supabase
       .channel(channelName)
       .on("postgres_changes", {
