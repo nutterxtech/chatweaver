@@ -107,6 +107,14 @@ export function useMessages(conversationId: string | null) {
         // Mark as read if window is open
         if (user && newMsg.sender_id !== user.id) {
           supabase.from("messages").update({ read_by: [...(newMsg.read_by ?? []), user.id] }).eq("id", newMsg.id);
+
+          // Auto-add sender to contacts if not already there
+          supabase.from("users").select("friends").eq("id", user.id).single().then(({ data }) => {
+            const friends: string[] = data?.friends ?? [];
+            if (!friends.includes(newMsg.sender_id)) {
+              supabase.from("users").update({ friends: [...friends, newMsg.sender_id] }).eq("id", user.id);
+            }
+          });
         }
       })
       .on("postgres_changes", {

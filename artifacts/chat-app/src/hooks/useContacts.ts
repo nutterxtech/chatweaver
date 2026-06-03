@@ -67,9 +67,10 @@ export function useContacts() {
       if (dm) return dm.id;
     }
 
+    const now = new Date().toISOString();
     const { data: conv } = await supabase
       .from("conversations")
-      .insert({ participants: [user.id, contactId], is_group: false })
+      .insert({ participants: [user.id, contactId], is_group: false, last_message_at: now, updated_at: now })
       .select()
       .single();
 
