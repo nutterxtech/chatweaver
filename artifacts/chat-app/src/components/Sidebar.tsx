@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import {
   MessageCircle, Users, Settings, Search, Plus, Moon, Sun, LogOut,
-  X, Phone, UserPlus, Check, Trash2, AlertTriangle, UserSearch
+  X, Check, Trash2, AlertTriangle, UserSearch, Phone
 } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
-import { useConversations } from "@/hooks/useConversations";
+import { useConversations, type ConversationWithDetails } from "@/hooks/useConversations";
 import { useContacts } from "@/hooks/useContacts";
 import { formatDistanceToNow } from "date-fns";
 import type { DBUser } from "@/lib/database.types";
@@ -19,6 +19,12 @@ interface SidebarProps {
   onSelectConversation: (id: string) => void;
 }
 
+interface GlobalResults {
+  chats: ConversationWithDetails[];
+  contacts: DBUser[];
+  others: DBUser[];
+}
+
 export function Sidebar({ selectedConversationId, onSelectConversation }: SidebarProps) {
   const { dbUser, signOut, deleteAccount } = useAuth();
   const { conversations, loading: convsLoading } = useConversations();
@@ -27,39 +33,60 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
 
   const [panel, setPanel] = useState<Panel>("chats");
   const [contactTab, setContactTab] = useState<ContactTab>("find");
-  const [search, setSearch] = useState("");
 
-  // Find people search
+  // ── Unified search (chats panel) ──
+  const [search, setSearch] = useState("");
+  const [globalResults, setGlobalResults] = useState<GlobalResults | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Find people search (contacts panel) ──
   const [findQuery, setFindQuery] = useState("");
   const [findResults, setFindResults] = useState<DBUser[]>([]);
   const [findLoading, setFindLoading] = useState(false);
   const findTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Add contact state
   const [addingId, setAddingId] = useState<string | null>(null);
-
-  // Delete account confirmation
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
-  const filteredConvs = conversations.filter(c => {
-    if (!search) return true;
-    const name = c.is_group ? c.group_name : c.other_user?.name;
-    return name?.toLowerCase().includes(search.toLowerCase());
-  });
+  // Run global search when typing in chats search bar
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const q = search.trim();
+    if (!q) { setGlobalResults(null); setSearchLoading(false); return; }
 
-  const filteredContacts = contacts.filter(c =>
-    !search || c.name.toLowerCase().includes(search.toLowerCase())
-      || c.phone?.toLowerCase().includes(search.toLowerCase())
-  );
+    setSearchLoading(true);
+    searchTimer.current = setTimeout(async () => {
+      // 1. Match conversations by name
+      const matchedChats = conversations.filter(c => {
+        const name = c.is_group ? c.group_name : c.other_user?.name;
+        return name?.toLowerCase().includes(q.toLowerCase());
+      });
+
+      // 2. All platform users matching query
+      const allUsers = await searchUsers(q);
+
+      // IDs already shown as chats
+      const chatUserIds = new Set(matchedChats.map(c => c.other_user?.id).filter(Boolean));
+
+      // Split into contacts vs others
+      const matchedContacts = allUsers.filter(u => dbUser?.friends?.includes(u.id) && !chatUserIds.has(u.id));
+      const matchedOthers = allUsers.filter(u => !dbUser?.friends?.includes(u.id) && !chatUserIds.has(u.id));
+
+      setGlobalResults({ chats: matchedChats, contacts: matchedContacts, others: matchedOthers });
+      setSearchLoading(false);
+    }, 300);
+
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [search, conversations]);
 
   // Auto-load all users when Find tab opens; filter as user types
   useEffect(() => {
-    if (contactTab !== "find") return;
+    if (contactTab !== "find" || panel !== "contacts") return;
     if (findTimer.current) clearTimeout(findTimer.current);
     setFindLoading(true);
-    // Debounce typed queries; load immediately on tab open (empty query = all users)
     const delay = findQuery.trim().length > 0 ? 350 : 0;
     findTimer.current = setTimeout(async () => {
       const results = await searchUsers(findQuery);
@@ -67,7 +94,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
       setFindLoading(false);
     }, delay);
     return () => { if (findTimer.current) clearTimeout(findTimer.current); };
-  }, [findQuery, contactTab]);
+  }, [findQuery, contactTab, panel]);
 
   const handleAddContact = async (userId: string) => {
     setAddingId(userId);
@@ -77,7 +104,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
 
   const handleUserClick = async (userId: string) => {
     const convId = await startConversation(userId);
-    if (convId) { onSelectConversation(convId); setPanel("chats"); }
+    if (convId) { onSelectConversation(convId); setPanel("chats"); setSearch(""); }
   };
 
   const handleDeleteAccount = async () => {
@@ -95,8 +122,12 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
 
   const isContact = (userId: string) => dbUser?.friends?.includes(userId) ?? false;
 
+  const totalSearchResults = globalResults
+    ? globalResults.chats.length + globalResults.contacts.length + globalResults.others.length
+    : 0;
+
   return (
-    <div className="flex h-full">
+    <div className="flex h-full w-full">
       {/* Icon rail */}
       <div className="flex flex-col items-center w-14 bg-[#128C7E] dark:bg-gray-900 py-3 gap-1 flex-shrink-0 transition-colors duration-200">
         <div className="mb-3">
@@ -133,7 +164,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                 <input
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  placeholder="Search chats..."
+                  placeholder="Search chats, contacts, people…"
                   className="w-full pl-9 pr-8 py-2 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#128C7E] border-none transition-colors duration-200"
                 />
                 {search && (
@@ -143,41 +174,115 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                 )}
               </div>
             </div>
+
             <div className="flex-1 overflow-y-auto">
-              {convsLoading ? <LoadingList /> : filteredConvs.length === 0 ? (
-                <EmptyHint icon={<MessageCircle className="w-8 h-8" />}
-                  text={search ? "No matching chats" : "No chats yet — go to People to find someone"} />
-              ) : filteredConvs.map(conv => {
-                const name = conv.is_group ? (conv.group_name ?? "Group") : (conv.other_user?.name ?? "Unknown");
-                const pic = conv.is_group ? conv.group_photo : conv.other_user?.profile_picture;
-                const online = !conv.is_group && isOnline(conv.other_user?.last_seen);
-                return (
-                  <button key={conv.id} onClick={() => onSelectConversation(conv.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left ${selectedConversationId === conv.id ? "bg-gray-100 dark:bg-gray-800" : ""}`}>
-                    <Avatar src={pic} name={name} size="md" online={!conv.is_group ? online : undefined} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-gray-900 dark:text-white text-sm truncate">{name}</span>
-                        {conv.last_message_at && (
-                          <span className="text-xs text-gray-400 dark:text-gray-500 ml-2 flex-shrink-0">
-                            {formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false })}
+              {/* ── UNIFIED SEARCH RESULTS ── */}
+              {search.trim() ? (
+                searchLoading ? <LoadingList /> :
+                totalSearchResults === 0 ? (
+                  <EmptyHint icon={<Search className="w-8 h-8" />} text="No results found" />
+                ) : (
+                  <>
+                    {/* Chats section */}
+                    {globalResults!.chats.length > 0 && (
+                      <section>
+                        <SectionLabel>Chats</SectionLabel>
+                        {globalResults!.chats.map(conv => {
+                          const name = conv.is_group ? (conv.group_name ?? "Group") : (conv.other_user?.name ?? "Unknown");
+                          const pic = conv.is_group ? conv.group_photo : conv.other_user?.profile_picture;
+                          const online = !conv.is_group && isOnline(conv.other_user?.last_seen);
+                          return (
+                            <button key={conv.id} onClick={() => { onSelectConversation(conv.id); setSearch(""); }}
+                              className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left ${selectedConversationId === conv.id ? "bg-gray-100 dark:bg-gray-800" : ""}`}>
+                              <Avatar src={pic} name={name} size="md" online={!conv.is_group ? online : undefined} />
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center justify-between">
+                                  <span className="font-semibold text-gray-900 dark:text-white text-sm truncate">{name}</span>
+                                  {conv.last_message_at && (
+                                    <span className="text-xs text-gray-400 ml-2 flex-shrink-0">
+                                      {formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false })}
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-xs text-gray-500 dark:text-gray-400 truncate block max-w-[180px]">
+                                  {conv.last_message ?? "Start a conversation"}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </section>
+                    )}
+
+                    {/* Contacts section */}
+                    {globalResults!.contacts.length > 0 && (
+                      <section>
+                        <SectionLabel>Contacts</SectionLabel>
+                        {globalResults!.contacts.map(u => (
+                          <UserRow key={u.id} u={u} isContact isFriend
+                            online={isOnline(u.last_seen)}
+                            onChat={() => handleUserClick(u.id)}
+                            onAdd={() => handleAddContact(u.id)}
+                            adding={addingId === u.id}
+                          />
+                        ))}
+                      </section>
+                    )}
+
+                    {/* Everyone else */}
+                    {globalResults!.others.length > 0 && (
+                      <section>
+                        <SectionLabel>People on this app</SectionLabel>
+                        {globalResults!.others.map(u => (
+                          <UserRow key={u.id} u={u} isContact={false} isFriend={false}
+                            online={isOnline(u.last_seen)}
+                            onChat={() => handleUserClick(u.id)}
+                            onAdd={() => handleAddContact(u.id)}
+                            adding={addingId === u.id}
+                          />
+                        ))}
+                      </section>
+                    )}
+                  </>
+                )
+              ) : (
+                /* ── NORMAL CHAT LIST ── */
+                convsLoading ? <LoadingList /> :
+                conversations.length === 0 ? (
+                  <EmptyHint icon={<MessageCircle className="w-8 h-8" />}
+                    text="No chats yet — go to People to find someone" />
+                ) : conversations.map(conv => {
+                  const name = conv.is_group ? (conv.group_name ?? "Group") : (conv.other_user?.name ?? "Unknown");
+                  const pic = conv.is_group ? conv.group_photo : conv.other_user?.profile_picture;
+                  const online = !conv.is_group && isOnline(conv.other_user?.last_seen);
+                  return (
+                    <button key={conv.id} onClick={() => onSelectConversation(conv.id)}
+                      className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left ${selectedConversationId === conv.id ? "bg-gray-100 dark:bg-gray-800" : ""}`}>
+                      <Avatar src={pic} name={name} size="md" online={!conv.is_group ? online : undefined} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-gray-900 dark:text-white text-sm truncate">{name}</span>
+                          {conv.last_message_at && (
+                            <span className="text-xs text-gray-400 dark:text-gray-500 ml-2 flex-shrink-0">
+                              {formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false })}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between mt-0.5">
+                          <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[160px]">
+                            {conv.last_message ?? "Start a conversation"}
                           </span>
-                        )}
+                          {conv.unread_count > 0 && (
+                            <span className="ml-2 flex-shrink-0 w-5 h-5 rounded-full bg-[#25D366] flex items-center justify-center text-white text-[10px] font-bold">
+                              {conv.unread_count}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between mt-0.5">
-                        <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[160px]">
-                          {conv.last_message ?? "Start a conversation"}
-                        </span>
-                        {conv.unread_count > 0 && (
-                          <span className="ml-2 flex-shrink-0 w-5 h-5 rounded-full bg-[#25D366] flex items-center justify-center text-white text-[10px] font-bold">
-                            {conv.unread_count}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
+                    </button>
+                  );
+                })
+              )}
             </div>
           </>
         )}
@@ -187,49 +292,46 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
           <>
             <div className="px-4 pt-4 pb-3">
               <h2 className="text-base font-bold text-gray-900 dark:text-white mb-3">People</h2>
-              {/* Tabs */}
               <div className="flex rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5 mb-3 transition-colors duration-200">
-                <button onClick={() => { setContactTab("find"); setSearch(""); }}
+                <button onClick={() => setContactTab("find")}
                   className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${contactTab === "find" ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"}`}>
                   Find People
                 </button>
-                <button onClick={() => { setContactTab("my"); setSearch(""); }}
+                <button onClick={() => setContactTab("my")}
                   className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${contactTab === "my" ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"}`}>
                   My Contacts ({contacts.length})
                 </button>
               </div>
 
-              {/* Find people search */}
               {contactTab === "find" && (
                 <div className="relative">
                   <UserSearch className="absolute left-3 top-2.5 w-3.5 h-3.5 text-gray-400" />
                   <input
                     value={findQuery}
                     onChange={e => setFindQuery(e.target.value)}
-                    placeholder="Search by name, phone, username..."
+                    placeholder="Search by name, phone, username…"
                     className="w-full pl-9 pr-8 py-2 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#128C7E] border-none transition-colors duration-200"
                     autoFocus
                   />
                   {findQuery && (
-                    <button onClick={() => { setFindQuery(""); setFindResults([]); }} className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                    <button onClick={() => setFindQuery("")} className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
                       <X className="w-3.5 h-3.5" />
                     </button>
                   )}
                 </div>
               )}
 
-              {/* My contacts search */}
               {contactTab === "my" && (
                 <div className="relative">
                   <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-gray-400" />
                   <input
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                    placeholder="Search your contacts..."
+                    value={findQuery}
+                    onChange={e => setFindQuery(e.target.value)}
+                    placeholder="Search your contacts…"
                     className="w-full pl-9 pr-8 py-2 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#128C7E] border-none transition-colors duration-200"
                   />
-                  {search && (
-                    <button onClick={() => setSearch("")} className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                  {findQuery && (
+                    <button onClick={() => setFindQuery("")} className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
                       <X className="w-3.5 h-3.5" />
                     </button>
                   )}
@@ -238,7 +340,6 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {/* Find People results */}
               {contactTab === "find" && (
                 findLoading ? <LoadingList /> :
                 findResults.length === 0 ? (
@@ -265,20 +366,23 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                         disabled={addingId === u.id}
                         className="flex items-center gap-1 text-xs bg-[#128C7E] hover:bg-[#0f7066] text-white px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-50 flex-shrink-0 transition-colors"
                       >
-                        {addingId === u.id ? "..." : <><Plus className="w-3 h-3" />Add</>}
+                        {addingId === u.id ? "…" : <><Plus className="w-3 h-3" />Add</>}
                       </button>
                     )}
                   </div>
                 ))
               )}
 
-              {/* My Contacts */}
               {contactTab === "my" && (
                 contactsLoading ? <LoadingList /> :
-                filteredContacts.length === 0 ? (
+                contacts.filter(c =>
+                  !findQuery || c.name.toLowerCase().includes(findQuery.toLowerCase()) || c.phone?.toLowerCase().includes(findQuery.toLowerCase())
+                ).length === 0 ? (
                   <EmptyHint icon={<Users className="w-8 h-8" />}
-                    text={search ? "No matching contacts" : "No contacts yet — use Find People to add someone"} />
-                ) : filteredContacts.map(contact => (
+                    text={findQuery ? "No matching contacts" : "No contacts yet — use Find People to add someone"} />
+                ) : contacts.filter(c =>
+                  !findQuery || c.name.toLowerCase().includes(findQuery.toLowerCase()) || c.phone?.toLowerCase().includes(findQuery.toLowerCase())
+                ).map(contact => (
                   <button key={contact.id} onClick={() => handleUserClick(contact.id)}
                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left">
                     <Avatar src={contact.profile_picture} name={contact.name} size="md" online={isOnline(contact.last_seen)} />
@@ -304,7 +408,6 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
           <div className="flex-1 overflow-y-auto">
             {dbUser && (
               <div className="p-4">
-                {/* Profile */}
                 <div className="flex flex-col items-center gap-3 py-5 border-b border-gray-100 dark:border-gray-800 mb-4">
                   <Avatar src={dbUser.profile_picture} name={dbUser.name} size="xl" online />
                   <div className="text-center">
@@ -326,7 +429,6 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                   <SettingRow label="Contacts" value={`${dbUser.friends?.length ?? 0} people`} />
                 </div>
 
-                {/* Delete Account */}
                 {!showDeleteConfirm ? (
                   <button
                     onClick={() => setShowDeleteConfirm(true)}
@@ -357,7 +459,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                         disabled={deleteLoading}
                         className="flex-1 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium disabled:opacity-60 transition-colors"
                       >
-                        {deleteLoading ? "Deleting..." : "Yes, delete"}
+                        {deleteLoading ? "Deleting…" : "Yes, delete"}
                       </button>
                     </div>
                   </div>
@@ -367,6 +469,56 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── Sub-components ──────────────────────────────────────────────────────────
+
+interface UserRowProps {
+  u: DBUser;
+  isContact: boolean;
+  isFriend: boolean;
+  online: boolean;
+  onChat: () => void;
+  onAdd: () => void;
+  adding: boolean;
+}
+
+function UserRow({ u, isFriend, online, onChat, onAdd, adding }: UserRowProps) {
+  return (
+    <div className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
+      <button onClick={onChat} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+        <Avatar src={u.profile_picture} name={u.name} size="md" online={online} />
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-gray-900 dark:text-white text-sm truncate">{u.name}</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 truncate">
+            {u.username ? `@${u.username}` : u.phone ?? ""}
+            {u.phone && u.username ? ` · ${u.phone}` : ""}
+          </p>
+        </div>
+      </button>
+      {isFriend ? (
+        <span className="flex items-center gap-1 text-xs text-[#128C7E] flex-shrink-0">
+          <Check className="w-3.5 h-3.5" /> Contact
+        </span>
+      ) : (
+        <button
+          onClick={onAdd}
+          disabled={adding}
+          className="flex items-center gap-1 text-xs bg-[#128C7E] hover:bg-[#0f7066] text-white px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-50 flex-shrink-0 transition-colors"
+        >
+          {adding ? "…" : <><Plus className="w-3 h-3" />Add</>}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="px-4 py-1.5 bg-gray-50 dark:bg-gray-800/50 border-y border-gray-100 dark:border-gray-800">
+      <span className="text-[11px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wide">{children}</span>
     </div>
   );
 }
