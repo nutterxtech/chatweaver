@@ -182,8 +182,8 @@ export function useMessages(conversationId: string | null) {
     };
     setMessages(prev => [...prev, optimistic]);
 
-    // 2. Persist to DB in background
-    supabase.from("messages").insert({
+    // 2. Persist to DB — must await or chain .then() for Supabase JS v2 to fire the request
+    await supabase.from("messages").insert({
       conversation_id: conversationId,
       sender_id: user.id,
       content: content.trim(),
@@ -191,7 +191,7 @@ export function useMessages(conversationId: string | null) {
       read_by: [user.id],
     });
 
-    supabase.from("conversations").update({
+    await supabase.from("conversations").update({
       last_message: content.trim().slice(0, 100),
       last_message_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
