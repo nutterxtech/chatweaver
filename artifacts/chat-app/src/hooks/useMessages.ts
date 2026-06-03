@@ -6,13 +6,14 @@ import type { DBMessage, DBUser } from "@/lib/database.types";
 export interface MessageWithSender extends DBMessage {
   sender: DBUser | null;
   reply_to_message: MessageWithSender | null;
+  _optimistic?: boolean; // true while pending DB confirmation
 }
 
 // Simple in-memory typing state (no DB table needed)
 const typingUsers = new Map<string, Map<string, { user: DBUser; expiry: number }>>();
 
 export function useMessages(conversationId: string | null) {
-  const { user } = useAuth();
+  const { user, dbUser } = useAuth();
   const [messages, setMessages] = useState<MessageWithSender[]>([]);
   const [loading, setLoading] = useState(false);
   const [typingList, setTypingList] = useState<DBUser[]>([]);
@@ -63,13 +64,9 @@ export function useMessages(conversationId: string | null) {
     if (user) {
       const unread = data.filter(m => m.sender_id !== user.id && !m.read_by?.includes(user.id));
       for (const msg of unread) {
-        const newReadBy = [...(msg.read_by ?? []), user.id];
-        supabase.from("messages").update({ read_by: newReadBy }).eq("id", msg.id);
+        supabase.from("messages").update({ read_by: [...(msg.read_by ?? []), user.id] }).eq("id", msg.id);
       }
-      // Clear unread flag on conversation
-      supabase.from("conversations")
-        .update({ unread_by: [] })
-        .eq("id", conversationId);
+      supabase.from("conversations").update({ unread_by: [] }).eq("id", conversationId);
     }
   };
 
@@ -77,8 +74,9 @@ export function useMessages(conversationId: string | null) {
     if (!conversationId) { setMessages([]); return; }
     fetchMessages();
 
-    // Real-time message subscription — unique name prevents "already subscribed" error
     const ts = Date.now();
+
+    // Real-time message subscription
     const msgChannel = supabase
       .channel(`msgs-${conversationId}-${ts}`)
       .on("postgres_changes", {
@@ -89,11 +87,26 @@ export function useMessages(conversationId: string | null) {
       }, async (payload) => {
         const newMsg = payload.new as DBMessage;
         const built = await buildWithSenders([newMsg]);
-        setMessages(prev => [...prev, ...built]);
+        setMessages(prev => {
+          // Replace matching optimistic message (same sender + content, sent within last 10s)
+          const optimisticIdx = prev.findIndex(m =>
+            m._optimistic &&
+            m.sender_id === newMsg.sender_id &&
+            m.content === newMsg.content &&
+            Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 10000
+          );
+          if (optimisticIdx !== -1) {
+            const next = [...prev];
+            next[optimisticIdx] = built[0];
+            return next;
+          }
+          // Avoid real duplicates
+          if (prev.some(m => m.id === newMsg.id)) return prev;
+          return [...prev, ...built];
+        });
         // Mark as read if window is open
         if (user && newMsg.sender_id !== user.id) {
-          const newReadBy = [...(newMsg.read_by ?? []), user.id];
-          supabase.from("messages").update({ read_by: newReadBy }).eq("id", newMsg.id);
+          supabase.from("messages").update({ read_by: [...(newMsg.read_by ?? []), user.id] }).eq("id", newMsg.id);
         }
       })
       .on("postgres_changes", {
@@ -103,16 +116,15 @@ export function useMessages(conversationId: string | null) {
         filter: `conversation_id=eq.${conversationId}`,
       }, (payload) => {
         const updated = payload.new as DBMessage;
-        setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, ...updated } : m));
+        setMessages(prev => prev.map(m => m.id === updated.id ? { ...m, ...updated, _optimistic: false } : m));
       })
       .subscribe();
 
-    // Typing via broadcast — unique name prevents "already subscribed" error
+    // Typing via broadcast
     const typingChannel = supabase
       .channel(`typing-bc-${conversationId}-${ts}`)
       .on("broadcast", { event: "typing" }, async ({ payload }) => {
         if (!payload?.userId || payload.userId === user?.id) return;
-        // Fetch user if not cached
         const { data: typingUser } = await supabase.from("users").select("*").eq("id", payload.userId).single();
         if (!typingUser) return;
 
@@ -141,7 +153,29 @@ export function useMessages(conversationId: string | null) {
   const sendMessage = async (content: string, replyToId?: string) => {
     if (!conversationId || !user || !content.trim()) return;
 
-    await supabase.from("messages").insert({
+    // 1. Show message instantly (optimistic)
+    const tempId = `temp-${Date.now()}-${Math.random()}`;
+    const optimistic: MessageWithSender = {
+      id: tempId,
+      conversation_id: conversationId,
+      sender_id: user.id,
+      content: content.trim(),
+      reply_to: replyToId ?? null,
+      reply_to_message: null,
+      read_by: [user.id],
+      is_system: false,
+      is_edited: false,
+      audio_url: null,
+      expires_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      sender: dbUser,
+      _optimistic: true,
+    };
+    setMessages(prev => [...prev, optimistic]);
+
+    // 2. Persist to DB in background
+    supabase.from("messages").insert({
       conversation_id: conversationId,
       sender_id: user.id,
       content: content.trim(),
@@ -149,7 +183,7 @@ export function useMessages(conversationId: string | null) {
       read_by: [user.id],
     });
 
-    await supabase.from("conversations").update({
+    supabase.from("conversations").update({
       last_message: content.trim().slice(0, 100),
       last_message_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),

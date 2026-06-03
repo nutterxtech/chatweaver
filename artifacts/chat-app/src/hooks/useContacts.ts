@@ -17,16 +17,20 @@ export function useContacts() {
     setLoading(false);
   };
 
-  // Search ALL platform users by name, phone, or username
+  // Search ALL platform users — empty query returns all (up to 60), otherwise filters
   const searchUsers = async (query: string): Promise<DBUser[]> => {
-    if (!query.trim() || query.trim().length < 2) return [];
     const q = query.trim();
-    const { data } = await supabase
+    let req = supabase
       .from("users")
       .select("*")
-      .or(`name.ilike.%${q}%,phone.ilike.%${q}%,username.ilike.%${q}%,email.ilike.%${q}%`)
       .neq("id", user?.id ?? "")
-      .limit(20);
+      .limit(60);
+
+    if (q.length >= 2) {
+      req = req.or(`name.ilike.%${q}%,phone.ilike.%${q}%,username.ilike.%${q}%,email.ilike.%${q}%`);
+    }
+
+    const { data } = await req.order("name", { ascending: true });
     return data ?? [];
   };
 
@@ -45,20 +49,6 @@ export function useContacts() {
     await refreshUser();
     await fetchContacts();
     return { user: found };
-  };
-
-  // Legacy: add by phone or email string (kept for backwards compat)
-  const addContactByPhoneOrEmail = async (phoneOrEmail: string): Promise<{ error?: string; user?: DBUser }> => {
-    if (!user || !dbUser) return { error: "Not authenticated" };
-    const isEmail = phoneOrEmail.includes("@");
-    const { data: found } = await supabase
-      .from("users")
-      .select("*")
-      .eq(isEmail ? "email" : "phone", phoneOrEmail.trim())
-      .single();
-
-    if (!found) return { error: "User not found with that " + (isEmail ? "email" : "phone") };
-    return addContact(found.id);
   };
 
   const startConversation = async (contactId: string): Promise<string | null> => {
@@ -90,5 +80,5 @@ export function useContacts() {
     fetchContacts();
   }, [dbUser]);
 
-  return { contacts, loading, addContact, addContactByPhoneOrEmail, searchUsers, startConversation, refetch: fetchContacts };
+  return { contacts, loading, addContact, searchUsers, startConversation, refetch: fetchContacts };
 }

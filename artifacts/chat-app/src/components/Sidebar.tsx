@@ -54,20 +54,18 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
       || c.phone?.toLowerCase().includes(search.toLowerCase())
   );
 
-  // Live search as user types
+  // Auto-load all users when Find tab opens; filter as user types
   useEffect(() => {
     if (contactTab !== "find") return;
     if (findTimer.current) clearTimeout(findTimer.current);
-    if (!findQuery.trim() || findQuery.trim().length < 2) {
-      setFindResults([]);
-      return;
-    }
     setFindLoading(true);
+    // Debounce typed queries; load immediately on tab open (empty query = all users)
+    const delay = findQuery.trim().length > 0 ? 350 : 0;
     findTimer.current = setTimeout(async () => {
       const results = await searchUsers(findQuery);
       setFindResults(results);
       setFindLoading(false);
-    }, 350);
+    }, delay);
     return () => { if (findTimer.current) clearTimeout(findTimer.current); };
   }, [findQuery, contactTab]);
 
@@ -243,11 +241,8 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
               {/* Find People results */}
               {contactTab === "find" && (
                 findLoading ? <LoadingList /> :
-                !findQuery.trim() || findQuery.trim().length < 2 ? (
-                  <EmptyHint icon={<UserSearch className="w-8 h-8" />}
-                    text="Type at least 2 characters to search all registered users by name, phone, or username" />
-                ) : findResults.length === 0 ? (
-                  <EmptyHint icon={<UserSearch className="w-8 h-8" />} text="No users found" />
+                findResults.length === 0 ? (
+                  <EmptyHint icon={<UserSearch className="w-8 h-8" />} text={findQuery ? "No users found" : "No other users registered yet"} />
                 ) : findResults.map(u => (
                   <div key={u.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                     <button onClick={() => handleUserClick(u.id)} className="flex items-center gap-3 flex-1 min-w-0 text-left">

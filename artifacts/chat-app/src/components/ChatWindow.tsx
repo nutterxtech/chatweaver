@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { Phone, Video, Search, MoreVertical, Send, Paperclip, Image, X, Reply, Trash2, ChevronDown } from "lucide-react";
+import { Search, MoreVertical, Send, Paperclip, Image, X, Reply, Trash2, ChevronDown, ArrowLeft, Clock } from "lucide-react";
 import { Avatar } from "./Avatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMessages, type MessageWithSender } from "@/hooks/useMessages";
@@ -8,9 +8,10 @@ import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
 
 interface ChatWindowProps {
   conversationId: string;
+  onBack?: () => void;
 }
 
-export function ChatWindow({ conversationId }: ChatWindowProps) {
+export function ChatWindow({ conversationId, onBack }: ChatWindowProps) {
   const { user } = useAuth();
   const { conversations } = useConversations();
   const { messages, loading, typingUsers, sendMessage, deleteMessage, startTyping, stopTyping } = useMessages(conversationId);
@@ -92,7 +93,16 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
   return (
     <div className="flex-1 flex flex-col h-full bg-[#efeae2] dark:bg-gray-950 relative">
       {/* Header */}
-      <div className="px-4 py-3 bg-[#f0f2f5] dark:bg-gray-900 flex items-center gap-3 border-b border-gray-200 dark:border-gray-800 shadow-sm">
+      <div className="px-3 py-3 bg-[#f0f2f5] dark:bg-gray-900 flex items-center gap-2 border-b border-gray-200 dark:border-gray-800 shadow-sm">
+        {/* Back button — mobile only */}
+        {onBack && (
+          <button
+            onClick={onBack}
+            className="md:hidden p-1.5 -ml-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors text-gray-600 dark:text-gray-300 flex-shrink-0"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+        )}
         <Avatar
           src={chatPic}
           name={chatName}
@@ -323,14 +333,16 @@ function MessageBubble({ msg, isMe, showAvatar, isConsecutive, isGroup, isHovere
           )}
 
           {/* Timestamp + read receipt */}
-          <div className={`flex items-center gap-1 mt-1 ${isMe ? "justify-end" : "justify-end"}`}>
+          <div className="flex items-center gap-1 mt-1 justify-end">
             <span className="text-[10px] text-gray-500 dark:text-gray-400">
               {format(new Date(msg.created_at), "HH:mm")}
             </span>
             {isMe && (
-              <span className={`text-[10px] ${isRead ? "text-[#4FC3F7]" : "text-gray-400"}`}>
-                {isRead ? "✓✓" : "✓"}
-              </span>
+              msg._optimistic
+                ? <Clock className="w-2.5 h-2.5 text-gray-400" />
+                : <span className={`text-[10px] ${isRead ? "text-[#4FC3F7]" : "text-gray-400"}`}>
+                    {isRead ? "✓✓" : "✓"}
+                  </span>
             )}
           </div>
         </div>
