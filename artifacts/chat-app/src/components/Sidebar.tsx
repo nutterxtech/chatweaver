@@ -100,6 +100,8 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
     setAddingId(userId);
     await addContact(userId);
     setAddingId(null);
+    // Move to My Contacts so the user can see the person they just added
+    setContactTab("my");
   };
 
   const handleUserClick = async (userId: string) => {
