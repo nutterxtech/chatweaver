@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useConversations, type ConversationWithDetails } from "@/hooks/useConversations";
 import { useContacts } from "@/hooks/useContacts";
-import { formatDistanceToNow } from "date-fns";
+import { format, isToday, isYesterday, isThisWeek } from "date-fns";
 import type { DBUser } from "@/lib/database.types";
 
 type Panel = "chats" | "contacts" | "settings";
@@ -124,6 +124,15 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
 
   const isContact = (userId: string) => dbUser?.friends?.includes(userId) ?? false;
 
+  // WhatsApp-style timestamp: today→time, yesterday→"Yesterday", this week→day name, older→date
+  const chatTime = (iso: string) => {
+    const d = new Date(iso);
+    if (isToday(d)) return format(d, "HH:mm");
+    if (isYesterday(d)) return "Yesterday";
+    if (isThisWeek(d, { weekStartsOn: 1 })) return format(d, "EEE");
+    return format(d, "dd/MM/yy");
+  };
+
   const totalSearchResults = globalResults
     ? globalResults.chats.length + globalResults.contacts.length + globalResults.others.length
     : 0;
@@ -202,7 +211,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                                   <span className="font-semibold text-gray-900 dark:text-white text-sm truncate">{name}</span>
                                   {conv.last_message_at && (
                                     <span className="text-xs text-gray-400 ml-2 flex-shrink-0">
-                                      {formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false })}
+                                      {chatTime(conv.last_message_at)}
                                     </span>
                                   )}
                                 </div>
@@ -266,7 +275,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                           <span className="font-semibold text-gray-900 dark:text-white text-sm truncate">{name}</span>
                           {conv.last_message_at && (
                             <span className="text-xs text-gray-400 dark:text-gray-500 ml-2 flex-shrink-0">
-                              {formatDistanceToNow(new Date(conv.last_message_at), { addSuffix: false })}
+                              {chatTime(conv.last_message_at)}
                             </span>
                           )}
                         </div>

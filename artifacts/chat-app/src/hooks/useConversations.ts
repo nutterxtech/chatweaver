@@ -21,7 +21,7 @@ export function useConversations() {
       .from("conversations")
       .select("*")
       .contains("participants", [user.id])
-      .order("last_message_at", { ascending: false, nullsFirst: true });
+      .order("last_message_at", { ascending: false, nullsFirst: false });
 
     if (error || !convs) { setLoading(false); return; }
 

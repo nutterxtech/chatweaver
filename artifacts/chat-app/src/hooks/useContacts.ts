@@ -17,13 +17,15 @@ export function useContacts() {
     setLoading(false);
   };
 
-  // Search ALL platform users — empty query returns all (up to 60), otherwise filters
+  // Search platform users — excludes self and already-added friends
   const searchUsers = async (query: string): Promise<DBUser[]> => {
     const q = query.trim();
+    const excludeIds = [user?.id ?? "", ...(dbUser?.friends ?? [])];
+
     let req = supabase
       .from("users")
       .select("*")
-      .neq("id", user?.id ?? "")
+      .not("id", "in", `(${excludeIds.join(",")})`)
       .limit(60);
 
     if (q.length >= 2) {
