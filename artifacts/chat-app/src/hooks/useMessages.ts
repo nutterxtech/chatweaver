@@ -60,13 +60,24 @@ export function useMessages(conversationId: string | null) {
     setMessages(withSenders);
     setLoading(false);
 
-    // Mark messages as read
+    // Mark messages as read — must await or Supabase JS v2 never fires the request
     if (user) {
       const unread = data.filter(m => m.sender_id !== user.id && !m.read_by?.includes(user.id));
-      for (const msg of unread) {
-        supabase.from("messages").update({ read_by: [...(msg.read_by ?? []), user.id] }).eq("id", msg.id);
+      if (unread.length > 0) {
+        // Update each message's read_by individually (can't batch different arrays)
+        await Promise.all(
+          unread.map(msg =>
+            supabase
+              .from("messages")
+              .update({ read_by: [...(msg.read_by ?? []), user.id] })
+              .eq("id", msg.id)
+          )
+        );
       }
-      supabase.from("conversations").update({ unread_by: [] }).eq("id", conversationId);
+      await supabase
+        .from("conversations")
+        .update({ unread_by: [] })
+        .eq("id", conversationId);
     }
   };
 
@@ -104,17 +115,19 @@ export function useMessages(conversationId: string | null) {
           if (prev.some(m => m.id === newMsg.id)) return prev;
           return [...prev, ...built];
         });
-        // Mark as read if window is open
+        // Mark as read if window is open — must await
         if (user && newMsg.sender_id !== user.id) {
-          supabase.from("messages").update({ read_by: [...(newMsg.read_by ?? []), user.id] }).eq("id", newMsg.id);
+          await supabase
+            .from("messages")
+            .update({ read_by: [...(newMsg.read_by ?? []), user.id] })
+            .eq("id", newMsg.id);
 
           // Auto-add sender to contacts if not already there
-          supabase.from("users").select("friends").eq("id", user.id).single().then(({ data }) => {
-            const friends: string[] = data?.friends ?? [];
-            if (!friends.includes(newMsg.sender_id)) {
-              supabase.from("users").update({ friends: [...friends, newMsg.sender_id] }).eq("id", user.id);
-            }
-          });
+          const { data: meData } = await supabase.from("users").select("friends").eq("id", user.id).single();
+          const friends: string[] = meData?.friends ?? [];
+          if (!friends.includes(newMsg.sender_id)) {
+            await supabase.from("users").update({ friends: [...friends, newMsg.sender_id] }).eq("id", user.id);
+          }
         }
       })
       .on("postgres_changes", {
