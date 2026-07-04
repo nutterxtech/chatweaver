@@ -4,7 +4,7 @@ import { Avatar } from "./Avatar";
 import { useAuth } from "@/contexts/AuthContext";
 import { useMessages, type MessageWithSender } from "@/hooks/useMessages";
 import { useConversations } from "@/hooks/useConversations";
-import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
+import { format, isToday, isYesterday } from "date-fns";
 
 interface ChatWindowProps {
   conversationId: string;
@@ -35,14 +35,20 @@ export function ChatWindow({ conversationId, onBack }: ChatWindowProps) {
     return Date.now() - new Date(lastSeen).getTime() < 5 * 60 * 1000;
   };
 
+  const lastSeenText = (lastSeen?: string | null): string => {
+    if (!lastSeen) return "last seen recently";
+    const d = new Date(lastSeen);
+    if (isToday(d)) return `last seen today at ${format(d, "HH:mm")}`;
+    if (isYesterday(d)) return `last seen yesterday at ${format(d, "HH:mm")}`;
+    return `last seen ${format(d, "dd/MM/yy")} at ${format(d, "HH:mm")}`;
+  };
+
   const statusText = conv?.is_group
     ? `${conv.participants.length} participants`
     : otherUser
       ? isOnline(otherUser.last_seen)
         ? "online"
-        : otherUser.last_seen
-          ? `last seen ${formatDistanceToNow(new Date(otherUser.last_seen), { addSuffix: true })}`
-          : "last seen recently"
+        : lastSeenText(otherUser.last_seen)
       : "";
 
   useEffect(() => {
@@ -335,20 +341,30 @@ function MessageBubble({ msg, isMe, showAvatar, isConsecutive, isGroup, isHovere
           )}
 
           {/* Timestamp + read receipt */}
-          <div className="flex items-center gap-1 mt-1 justify-end">
-            <span className="text-[10px] text-gray-500 dark:text-gray-400">
+          <div className="flex items-center gap-0.5 mt-1 justify-end">
+            <span className="text-[10px] text-gray-500 dark:text-gray-400 mr-0.5">
               {format(new Date(msg.created_at), "HH:mm")}
             </span>
             {isMe && (
               msg._optimistic
-                ? <Clock className="w-2.5 h-2.5 text-gray-400" />
-                : <span className={`text-[10px] ${isRead ? "text-[#4FC3F7]" : "text-gray-400"}`}>
-                    {isRead ? "✓✓" : "✓"}
-                  </span>
+                ? <Clock className="w-3 h-3 text-gray-400" />
+                : isRead
+                  ? <DoubleTick blue />
+                  : <DoubleTick />
             )}
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function DoubleTick({ blue = false }: { blue?: boolean }) {
+  const color = blue ? "#4FC3F7" : "#8696a0";
+  return (
+    <svg width="16" height="11" viewBox="0 0 16 11" className="inline-block flex-shrink-0">
+      <path d="M1 5.5L4.5 9L10 2" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <path d="M5 5.5L8.5 9L14 2" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    </svg>
   );
 }

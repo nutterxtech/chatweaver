@@ -7,7 +7,7 @@ interface AvatarProps {
 }
 
 const sizeMap = { sm: "w-8 h-8 text-xs", md: "w-10 h-10 text-sm", lg: "w-12 h-12 text-base", xl: "w-16 h-16 text-xl" };
-const dotMap = { sm: "w-2 h-2 border", md: "w-2.5 h-2.5 border", lg: "w-3 h-3 border-2", xl: "w-4 h-4 border-2" };
+const dotMap = { sm: "w-2.5 h-2.5 border-[1.5px]", md: "w-3 h-3 border-2", lg: "w-3.5 h-3.5 border-2", xl: "w-4 h-4 border-2" };
 
 function getInitials(name: string) {
   return name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase();
@@ -29,7 +29,9 @@ export function Avatar({ src, name, size = "md", online, className = "" }: Avata
         </div>
       )}
       {online !== undefined && (
-        <span className={`absolute bottom-0 right-0 ${dotMap[size]} rounded-full border-white dark:border-gray-900 ${online ? "bg-green-500" : "bg-gray-400"}`} />
+        <span
+          className={`absolute bottom-0 right-0 ${dotMap[size]} rounded-full border-white dark:border-gray-900 ${online ? "bg-green-500" : "bg-red-500"}`}
+        />
       )}
     </div>
   );
