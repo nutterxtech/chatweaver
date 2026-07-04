@@ -27,7 +27,7 @@ interface GlobalResults {
 
 export function Sidebar({ selectedConversationId, onSelectConversation }: SidebarProps) {
   const { dbUser, signOut, deleteAccount } = useAuth();
-  const { conversations, loading: convsLoading } = useConversations();
+  const { conversations, loading: convsLoading, markConversationRead } = useConversations();
   const { contacts, loading: contactsLoading, addContact, searchUsers, startConversation } = useContacts();
   const { theme, toggleTheme } = useTheme();
 
@@ -106,7 +106,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
 
   const handleUserClick = async (userId: string) => {
     const convId = await startConversation(userId);
-    if (convId) { onSelectConversation(convId); setPanel("chats"); setSearch(""); }
+    if (convId) { markConversationRead(convId); onSelectConversation(convId); setPanel("chats"); setSearch(""); }
   };
 
   const handleDeleteAccount = async () => {
@@ -203,7 +203,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                           const pic = conv.is_group ? conv.group_photo : conv.other_user?.profile_picture;
                           const online = !conv.is_group && isOnline(conv.other_user?.last_seen);
                           return (
-                            <button key={conv.id} onClick={() => { onSelectConversation(conv.id); setSearch(""); }}
+                            <button key={conv.id} onClick={() => { markConversationRead(conv.id); onSelectConversation(conv.id); setSearch(""); }}
                               className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left ${selectedConversationId === conv.id ? "bg-gray-100 dark:bg-gray-800" : ""}`}>
                               <Avatar src={pic} name={name} size="md" online={!conv.is_group ? online : undefined} />
                               <div className="flex-1 min-w-0">
@@ -267,7 +267,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                   const pic = conv.is_group ? conv.group_photo : conv.other_user?.profile_picture;
                   const online = !conv.is_group && isOnline(conv.other_user?.last_seen);
                   return (
-                    <button key={conv.id} onClick={() => onSelectConversation(conv.id)}
+                    <button key={conv.id} onClick={() => { markConversationRead(conv.id); onSelectConversation(conv.id); }}
                       className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left ${selectedConversationId === conv.id ? "bg-gray-100 dark:bg-gray-800" : ""}`}>
                       <Avatar src={pic} name={name} size="md" online={!conv.is_group ? online : undefined} />
                       <div className="flex-1 min-w-0">

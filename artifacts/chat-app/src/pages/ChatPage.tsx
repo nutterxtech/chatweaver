@@ -11,13 +11,6 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-white dark:bg-gray-900 transition-colors duration-200">
-      {/*
-        Mobile:  show sidebar full-width when no chat is selected;
-                 show chat full-width when a chat is selected.
-        Desktop: always show sidebar (fixed width) + chat side by side.
-      */}
-
-      {/* Sidebar */}
       <div className={`
         flex-shrink-0 h-full
         ${selectedConversationId ? "hidden md:flex" : "flex w-full"}
@@ -29,7 +22,6 @@ export default function ChatPage() {
         />
       </div>
 
-      {/* Chat area */}
       <div className={`
         flex-1 h-full min-w-0
         ${selectedConversationId ? "flex" : "hidden md:flex"}
