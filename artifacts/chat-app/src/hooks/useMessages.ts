@@ -183,7 +183,7 @@ export function useMessages(conversationId: string | null) {
     setMessages(prev => [...prev, optimistic]);
 
     // 2. Persist to DB — must await or chain .then() for Supabase JS v2 to fire the request
-    await supabase.from("messages").insert({
+    const { error: insertError } = await supabase.from("messages").insert({
       conversation_id: conversationId,
       sender_id: user.id,
       content: content.trim(),
@@ -191,10 +191,16 @@ export function useMessages(conversationId: string | null) {
       read_by: [user.id],
     });
 
+    if (insertError) {
+      // Roll back optimistic message on failure
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      console.error("Failed to send message:", insertError.message);
+      return;
+    }
+
     await supabase.from("conversations").update({
       last_message: content.trim().slice(0, 100),
       last_message_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
     }).eq("id", conversationId);
 
     stopTyping();
@@ -204,7 +210,6 @@ export function useMessages(conversationId: string | null) {
     await supabase.from("messages").update({
       content: null,
       is_edited: true,
-      updated_at: new Date().toISOString(),
     }).eq("id", messageId);
   };
 

@@ -31,21 +31,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchDbUser(session.user.id).finally(() => setLoading(false));
-      } else {
+    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
+      // Stale/invalid token — wipe it so the user lands on login
+      if (error || !session) {
+        await supabase.auth.signOut();
+        setSession(null);
+        setUser(null);
+        setDbUser(null);
         setLoading(false);
+        return;
       }
+      setSession(session);
+      setUser(session.user);
+      fetchDbUser(session.user.id).finally(() => setLoading(false));
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // TOKEN_REFRESHED failure or explicit sign-out → clear everything
+      if (event === "SIGNED_OUT" || !session) {
+        setSession(null);
+        setUser(null);
+        setDbUser(null);
+        return;
+      }
       setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) fetchDbUser(session.user.id);
-      else setDbUser(null);
+      setUser(session.user);
+      fetchDbUser(session.user.id);
     });
 
     return () => subscription.unsubscribe();

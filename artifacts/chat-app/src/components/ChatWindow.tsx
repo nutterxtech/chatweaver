@@ -40,7 +40,9 @@ export function ChatWindow({ conversationId, onBack }: ChatWindowProps) {
     : otherUser
       ? isOnline(otherUser.last_seen)
         ? "online"
-        : `last seen ${formatDistanceToNow(new Date(otherUser.last_seen), { addSuffix: true })}`
+        : otherUser.last_seen
+          ? `last seen ${formatDistanceToNow(new Date(otherUser.last_seen), { addSuffix: true })}`
+          : "last seen recently"
       : "";
 
   useEffect(() => {
