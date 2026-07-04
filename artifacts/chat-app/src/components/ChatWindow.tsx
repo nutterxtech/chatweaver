@@ -36,7 +36,7 @@ export function ChatWindow({ conversationId, onBack }: ChatWindowProps) {
   };
 
   const lastSeenText = (lastSeen?: string | null): string => {
-    if (!lastSeen) return "last seen recently";
+    if (!lastSeen) return "";
     const d = new Date(lastSeen);
     if (isToday(d)) return `last seen today at ${format(d, "HH:mm")}`;
     if (isYesterday(d)) return `last seen yesterday at ${format(d, "HH:mm")}`;

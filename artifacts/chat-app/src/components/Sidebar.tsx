@@ -283,7 +283,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                           <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[160px]">
                             {conv.last_message ?? "Start a conversation"}
                           </span>
-                          {conv.unread_count > 0 && (
+                          {conv.unread_count > 0 && conv.id !== selectedConversationId && (
                             <span className="ml-2 flex-shrink-0 w-5 h-5 rounded-full bg-[#25D366] flex items-center justify-center text-white text-[10px] font-bold">
                               {conv.unread_count}
                             </span>
