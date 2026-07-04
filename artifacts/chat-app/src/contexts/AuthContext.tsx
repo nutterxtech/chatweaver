@@ -65,10 +65,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Mark online/offline
   useEffect(() => {
     if (!user) return;
-    supabase.from("users").update({ last_seen: new Date().toISOString() }).eq("id", user.id);
+    // Must await — Supabase JS v2 lazy promises never fire without await/.then()
+    supabase.from("users").update({ last_seen: new Date().toISOString() }).eq("id", user.id).then();
 
     const handleUnload = () => {
-      supabase.from("users").update({ last_seen: new Date().toISOString() }).eq("id", user.id);
+      supabase.from("users").update({ last_seen: new Date().toISOString() }).eq("id", user.id).then();
     };
     window.addEventListener("beforeunload", handleUnload);
     return () => window.removeEventListener("beforeunload", handleUnload);

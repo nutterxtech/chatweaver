@@ -122,6 +122,10 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
     return Date.now() - new Date(lastSeen).getTime() < 5 * 60 * 1000;
   };
 
+  // Returns true/false only when last_seen exists; undefined = no dot shown
+  const onlineProp = (lastSeen?: string | null): boolean | undefined =>
+    lastSeen ? isOnline(lastSeen) : undefined;
+
   const isContact = (userId: string) => dbUser?.friends?.includes(userId) ?? false;
 
   // WhatsApp-style timestamp: today→time, yesterday→"Yesterday", this week→day name, older→date
@@ -201,7 +205,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                         {globalResults!.chats.map(conv => {
                           const name = conv.is_group ? (conv.group_name ?? "Group") : (conv.other_user?.name ?? "Unknown");
                           const pic = conv.is_group ? conv.group_photo : conv.other_user?.profile_picture;
-                          const online = !conv.is_group && isOnline(conv.other_user?.last_seen);
+                          const online = !conv.is_group ? onlineProp(conv.other_user?.last_seen) : undefined;
                           return (
                             <button key={conv.id} onClick={() => { markConversationRead(conv.id); onSelectConversation(conv.id); setSearch(""); }}
                               className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left ${selectedConversationId === conv.id ? "bg-gray-100 dark:bg-gray-800" : ""}`}>
@@ -231,7 +235,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                         <SectionLabel>Contacts</SectionLabel>
                         {globalResults!.contacts.map(u => (
                           <UserRow key={u.id} u={u} isContact isFriend
-                            online={isOnline(u.last_seen)}
+                            online={onlineProp(u.last_seen)}
                             onChat={() => handleUserClick(u.id)}
                             onAdd={() => handleAddContact(u.id)}
                             adding={addingId === u.id}
@@ -246,7 +250,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                         <SectionLabel>People on this app</SectionLabel>
                         {globalResults!.others.map(u => (
                           <UserRow key={u.id} u={u} isContact={false} isFriend={false}
-                            online={isOnline(u.last_seen)}
+                            online={onlineProp(u.last_seen)}
                             onChat={() => handleUserClick(u.id)}
                             onAdd={() => handleAddContact(u.id)}
                             adding={addingId === u.id}
@@ -265,7 +269,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                 ) : conversations.map(conv => {
                   const name = conv.is_group ? (conv.group_name ?? "Group") : (conv.other_user?.name ?? "Unknown");
                   const pic = conv.is_group ? conv.group_photo : conv.other_user?.profile_picture;
-                  const online = !conv.is_group && isOnline(conv.other_user?.last_seen);
+                  const online = !conv.is_group ? onlineProp(conv.other_user?.last_seen) : undefined;
                   return (
                     <button key={conv.id} onClick={() => { markConversationRead(conv.id); onSelectConversation(conv.id); }}
                       className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left ${selectedConversationId === conv.id ? "bg-gray-100 dark:bg-gray-800" : ""}`}>
@@ -358,7 +362,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                 ) : findResults.map(u => (
                   <div key={u.id} className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                     <button onClick={() => handleUserClick(u.id)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
-                      <Avatar src={u.profile_picture} name={u.name} size="md" online={isOnline(u.last_seen)} />
+                      <Avatar src={u.profile_picture} name={u.name} size="md" online={onlineProp(u.last_seen)} />
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-gray-900 dark:text-white text-sm truncate">{u.name}</p>
                         <div className="flex items-center gap-1.5 mt-0.5">
@@ -396,7 +400,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                 ).map(contact => (
                   <button key={contact.id} onClick={() => handleUserClick(contact.id)}
                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left">
-                    <Avatar src={contact.profile_picture} name={contact.name} size="md" online={isOnline(contact.last_seen)} />
+                    <Avatar src={contact.profile_picture} name={contact.name} size="md" online={onlineProp(contact.last_seen)} />
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-gray-900 dark:text-white text-sm">{contact.name}</p>
                       <div className="flex items-center gap-1.5 mt-0.5">
@@ -404,7 +408,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                         <p className="text-xs text-gray-500 dark:text-gray-400">{contact.phone}</p>
                       </div>
                     </div>
-                    {isOnline(contact.last_seen) && (
+                    {contact.last_seen && isOnline(contact.last_seen) && (
                       <span className="text-xs text-green-500 flex-shrink-0">online</span>
                     )}
                   </button>

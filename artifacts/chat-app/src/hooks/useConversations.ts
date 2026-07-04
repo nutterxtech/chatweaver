@@ -29,12 +29,27 @@ export function useConversations() {
     const { data: users } = await supabase.from("users").select("*").in("id", allIds);
     const userMap = new Map(users?.map(u => [u.id, u]) ?? []);
 
+    // Count unread messages: sent by others, not yet read by me
+    const convIds = convs.map(c => c.id);
+    const unreadMap = new Map<string, number>();
+    if (convIds.length > 0) {
+      const { data: unreadRows } = await supabase
+        .from("messages")
+        .select("conversation_id")
+        .in("conversation_id", convIds)
+        .neq("sender_id", user.id)
+        .not("read_by", "cs", `{${user.id}}`);
+
+      for (const row of unreadRows ?? []) {
+        unreadMap.set(row.conversation_id, (unreadMap.get(row.conversation_id) ?? 0) + 1);
+      }
+    }
+
     const detailed: ConversationWithDetails[] = convs.map(conv => {
       const otherIds = conv.participants.filter(id => id !== user.id);
       const other_user = otherIds.length === 1 ? (userMap.get(otherIds[0]) ?? null) : null;
       const participants_data = conv.participants.map(id => userMap.get(id)).filter(Boolean) as DBUser[];
-      // Use conversations.unread_by[] — avoids per-message RLS issues
-      const unread_count = conv.unread_by?.includes(user.id) ? 1 : 0;
+      const unread_count = unreadMap.get(conv.id) ?? 0;
       return { ...conv, other_user, participants_data, unread_count };
     });
 
@@ -42,7 +57,7 @@ export function useConversations() {
     setLoading(false);
   };
 
-  // Instantly zero the badge in local state + clear unread_by in DB
+  // Instantly clear badge in local state; also clear unread_by in DB
   const markConversationRead = async (conversationId: string) => {
     setConversations(prev =>
       prev.map(c => c.id === conversationId ? { ...c, unread_count: 0 } : c)
@@ -62,6 +77,7 @@ export function useConversations() {
     const channel = supabase
       .channel(channelName)
       .on("postgres_changes", { event: "*", schema: "public", table: "conversations" }, () => fetchConversations())
+      .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, () => fetchConversations())
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };

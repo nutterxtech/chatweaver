@@ -115,7 +115,7 @@ export function ChatWindow({ conversationId, onBack }: ChatWindowProps) {
           src={chatPic}
           name={chatName}
           size="md"
-          online={!conv?.is_group ? isOnline(otherUser?.last_seen) : undefined}
+          online={!conv?.is_group ? (otherUser?.last_seen ? isOnline(otherUser.last_seen) : undefined) : undefined}
         />
         <div className="flex-1 min-w-0">
           <h2 className="font-semibold text-sm text-gray-900 dark:text-white truncate">{chatName}</h2>
