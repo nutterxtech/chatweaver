@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "h4VrlsCRkLT-B_1VUhaEF"
+uri = "file://attached_assets/generated_images/a_modern_chat_app_7686.png"
+type = "image"
+title = "generated_image"
