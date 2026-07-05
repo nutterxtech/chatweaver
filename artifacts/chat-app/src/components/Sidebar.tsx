@@ -34,13 +34,11 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
   const [panel, setPanel] = useState<Panel>("chats");
   const [contactTab, setContactTab] = useState<ContactTab>("find");
 
-  // ── Unified search (chats panel) ──
   const [search, setSearch] = useState("");
   const [globalResults, setGlobalResults] = useState<GlobalResults | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Find people search (contacts panel) ──
   const [findQuery, setFindQuery] = useState("");
   const [findResults, setFindResults] = useState<DBUser[]>([]);
   const [findLoading, setFindLoading] = useState(false);
@@ -51,38 +49,26 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
-  // Run global search when typing in chats search bar
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
     const q = search.trim();
     if (!q) { setGlobalResults(null); setSearchLoading(false); return; }
-
     setSearchLoading(true);
     searchTimer.current = setTimeout(async () => {
-      // 1. Match conversations by name
       const matchedChats = conversations.filter(c => {
         const name = c.is_group ? c.group_name : c.other_user?.name;
         return name?.toLowerCase().includes(q.toLowerCase());
       });
-
-      // 2. All platform users matching query
       const allUsers = await searchUsers(q);
-
-      // IDs already shown as chats
       const chatUserIds = new Set(matchedChats.map(c => c.other_user?.id).filter(Boolean));
-
-      // Split into contacts vs others
       const matchedContacts = allUsers.filter(u => dbUser?.friends?.includes(u.id) && !chatUserIds.has(u.id));
       const matchedOthers = allUsers.filter(u => !dbUser?.friends?.includes(u.id) && !chatUserIds.has(u.id));
-
       setGlobalResults({ chats: matchedChats, contacts: matchedContacts, others: matchedOthers });
       setSearchLoading(false);
     }, 300);
-
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
   }, [search, conversations]);
 
-  // Auto-load all users when Find tab opens; filter as user types
   useEffect(() => {
     if (contactTab !== "find" || panel !== "contacts") return;
     if (findTimer.current) clearTimeout(findTimer.current);
@@ -100,7 +86,6 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
     setAddingId(userId);
     await addContact(userId);
     setAddingId(null);
-    // Move to My Contacts so the user can see the person they just added
     setContactTab("my");
   };
 
@@ -122,13 +107,11 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
     return Date.now() - new Date(lastSeen).getTime() < 5 * 60 * 1000;
   };
 
-  // Returns true/false only when last_seen exists; undefined = no dot shown
   const onlineProp = (lastSeen?: string | null): boolean | undefined =>
     lastSeen ? isOnline(lastSeen) : undefined;
 
   const isContact = (userId: string) => dbUser?.friends?.includes(userId) ?? false;
 
-  // WhatsApp-style timestamp: today→time, yesterday→"Yesterday", this week→day name, older→date
   const chatTime = (iso: string) => {
     const d = new Date(iso);
     if (isToday(d)) return format(d, "HH:mm");
@@ -142,9 +125,36 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
     : 0;
 
   return (
-    <div className="flex h-full w-full">
-      {/* Icon rail */}
-      <div className="flex flex-col items-center w-14 bg-[#128C7E] dark:bg-gray-900 py-3 gap-1 flex-shrink-0 transition-colors duration-200">
+    <div className="flex flex-col md:flex-row h-full w-full">
+
+      {/* ── MOBILE TOP BAR (hidden on md+) ── */}
+      <div className="md:hidden flex-shrink-0 bg-[#128C7E] dark:bg-gray-900 transition-colors">
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Avatar src={dbUser?.profile_picture} name={dbUser?.name ?? "U"} size="sm" online />
+            <span className="text-white font-bold text-lg tracking-tight">WhatsChat</span>
+          </div>
+          <div className="flex items-center gap-0.5">
+            <button onClick={toggleTheme}
+              className="w-9 h-9 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors">
+              {theme === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+            </button>
+            <button onClick={signOut}
+              className="w-9 h-9 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors">
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+        {/* Mobile tab bar */}
+        <div className="flex border-t border-white/20">
+          <MobileTabBtn label="CHATS" active={panel === "chats"} onClick={() => setPanel("chats")} />
+          <MobileTabBtn label="PEOPLE" active={panel === "contacts"} onClick={() => setPanel("contacts")} />
+          <MobileTabBtn label="SETTINGS" active={panel === "settings"} onClick={() => setPanel("settings")} />
+        </div>
+      </div>
+
+      {/* ── DESKTOP ICON RAIL (hidden on mobile) ── */}
+      <div className="hidden md:flex flex-col items-center w-14 bg-[#128C7E] dark:bg-gray-900 py-3 gap-1 flex-shrink-0 transition-colors duration-200">
         <div className="mb-3">
           <Avatar src={dbUser?.profile_picture} name={dbUser?.name ?? "U"} size="sm" online />
         </div>
@@ -166,14 +176,14 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
         </NavBtn>
       </div>
 
-      {/* Panel */}
-      <div className="flex flex-col flex-1 min-w-0 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 transition-colors duration-200">
+      {/* ── PANEL CONTENT ── */}
+      <div className="flex flex-col flex-1 min-w-0 bg-white dark:bg-gray-900 md:border-r border-gray-200 dark:border-gray-800 transition-colors duration-200 overflow-hidden">
 
         {/* ── CHATS ── */}
         {panel === "chats" && (
           <>
             <div className="px-4 pt-4 pb-3">
-              <h2 className="text-base font-bold text-gray-900 dark:text-white mb-3">Chats</h2>
+              <h2 className="hidden md:block text-base font-bold text-gray-900 dark:text-white mb-3">Chats</h2>
               <div className="relative">
                 <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-gray-400" />
                 <input
@@ -191,14 +201,12 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {/* ── UNIFIED SEARCH RESULTS ── */}
               {search.trim() ? (
                 searchLoading ? <LoadingList /> :
                 totalSearchResults === 0 ? (
                   <EmptyHint icon={<Search className="w-8 h-8" />} text="No results found" />
                 ) : (
                   <>
-                    {/* Chats section */}
                     {globalResults!.chats.length > 0 && (
                       <section>
                         <SectionLabel>Chats</SectionLabel>
@@ -209,14 +217,12 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                           return (
                             <button key={conv.id} onClick={() => { markConversationRead(conv.id); onSelectConversation(conv.id); setSearch(""); }}
                               className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left ${selectedConversationId === conv.id ? "bg-gray-100 dark:bg-gray-800" : ""}`}>
-                              <Avatar src={pic} name={name} size="md" online={!conv.is_group ? online : undefined} />
+                              <Avatar src={pic} name={name} size="md" online={online} />
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center justify-between">
                                   <span className="font-semibold text-gray-900 dark:text-white text-sm truncate">{name}</span>
                                   {conv.last_message_at && (
-                                    <span className="text-xs text-gray-400 ml-2 flex-shrink-0">
-                                      {chatTime(conv.last_message_at)}
-                                    </span>
+                                    <span className="text-xs text-gray-400 ml-2 flex-shrink-0">{chatTime(conv.last_message_at)}</span>
                                   )}
                                 </div>
                                 <span className="text-xs text-gray-500 dark:text-gray-400 truncate block max-w-[180px]">
@@ -228,8 +234,6 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                         })}
                       </section>
                     )}
-
-                    {/* Contacts section */}
                     {globalResults!.contacts.length > 0 && (
                       <section>
                         <SectionLabel>Contacts</SectionLabel>
@@ -243,8 +247,6 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                         ))}
                       </section>
                     )}
-
-                    {/* Everyone else */}
                     {globalResults!.others.length > 0 && (
                       <section>
                         <SectionLabel>People on this app</SectionLabel>
@@ -261,7 +263,6 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                   </>
                 )
               ) : (
-                /* ── NORMAL CHAT LIST ── */
                 convsLoading ? <LoadingList /> :
                 conversations.length === 0 ? (
                   <EmptyHint icon={<MessageCircle className="w-8 h-8" />}
@@ -273,14 +274,12 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                   return (
                     <button key={conv.id} onClick={() => { markConversationRead(conv.id); onSelectConversation(conv.id); }}
                       className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left ${selectedConversationId === conv.id ? "bg-gray-100 dark:bg-gray-800" : ""}`}>
-                      <Avatar src={pic} name={name} size="md" online={!conv.is_group ? online : undefined} />
+                      <Avatar src={pic} name={name} size="md" online={online} />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
                           <span className="font-semibold text-gray-900 dark:text-white text-sm truncate">{name}</span>
                           {conv.last_message_at && (
-                            <span className="text-xs text-gray-400 dark:text-gray-500 ml-2 flex-shrink-0">
-                              {chatTime(conv.last_message_at)}
-                            </span>
+                            <span className="text-xs text-gray-400 dark:text-gray-500 ml-2 flex-shrink-0">{chatTime(conv.last_message_at)}</span>
                           )}
                         </div>
                         <div className="flex items-center justify-between mt-0.5">
@@ -306,7 +305,7 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
         {panel === "contacts" && (
           <>
             <div className="px-4 pt-4 pb-3">
-              <h2 className="text-base font-bold text-gray-900 dark:text-white mb-3">People</h2>
+              <h2 className="hidden md:block text-base font-bold text-gray-900 dark:text-white mb-3">People</h2>
               <div className="flex rounded-lg bg-gray-100 dark:bg-gray-800 p-0.5 mb-3 transition-colors duration-200">
                 <button onClick={() => setContactTab("find")}
                   className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-colors ${contactTab === "find" ? "bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm" : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"}`}>
@@ -317,17 +316,13 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                   My Contacts ({contacts.length})
                 </button>
               </div>
-
               {contactTab === "find" && (
                 <div className="relative">
                   <UserSearch className="absolute left-3 top-2.5 w-3.5 h-3.5 text-gray-400" />
-                  <input
-                    value={findQuery}
-                    onChange={e => setFindQuery(e.target.value)}
+                  <input value={findQuery} onChange={e => setFindQuery(e.target.value)}
                     placeholder="Search by name, phone, username…"
                     className="w-full pl-9 pr-8 py-2 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#128C7E] border-none transition-colors duration-200"
-                    autoFocus
-                  />
+                    autoFocus />
                   {findQuery && (
                     <button onClick={() => setFindQuery("")} className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
                       <X className="w-3.5 h-3.5" />
@@ -335,16 +330,12 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                   )}
                 </div>
               )}
-
               {contactTab === "my" && (
                 <div className="relative">
                   <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-gray-400" />
-                  <input
-                    value={findQuery}
-                    onChange={e => setFindQuery(e.target.value)}
+                  <input value={findQuery} onChange={e => setFindQuery(e.target.value)}
                     placeholder="Search your contacts…"
-                    className="w-full pl-9 pr-8 py-2 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#128C7E] border-none transition-colors duration-200"
-                  />
+                    className="w-full pl-9 pr-8 py-2 text-sm rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-[#128C7E] border-none transition-colors duration-200" />
                   {findQuery && (
                     <button onClick={() => setFindQuery("")} className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
                       <X className="w-3.5 h-3.5" />
@@ -376,18 +367,14 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                         <Check className="w-3.5 h-3.5" /> Added
                       </span>
                     ) : (
-                      <button
-                        onClick={() => handleAddContact(u.id)}
-                        disabled={addingId === u.id}
-                        className="flex items-center gap-1 text-xs bg-[#128C7E] hover:bg-[#0f7066] text-white px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-50 flex-shrink-0 transition-colors"
-                      >
+                      <button onClick={() => handleAddContact(u.id)} disabled={addingId === u.id}
+                        className="flex items-center gap-1 text-xs bg-[#128C7E] hover:bg-[#0f7066] text-white px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-50 flex-shrink-0 transition-colors">
                         {addingId === u.id ? "…" : <><Plus className="w-3 h-3" />Add</>}
                       </button>
                     )}
                   </div>
                 ))
               )}
-
               {contactTab === "my" && (
                 contactsLoading ? <LoadingList /> :
                 contacts.filter(c =>
@@ -435,7 +422,6 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                     )}
                   </div>
                 </div>
-
                 <div className="space-y-1 mb-6">
                   <SettingRow label="Email" value={dbUser.email} />
                   <SettingRow label="Phone" value={dbUser.phone} />
@@ -443,12 +429,9 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                   <SettingRow label="Username" value={`@${dbUser.username}`} />
                   <SettingRow label="Contacts" value={`${dbUser.friends?.length ?? 0} people`} />
                 </div>
-
                 {!showDeleteConfirm ? (
-                  <button
-                    onClick={() => setShowDeleteConfirm(true)}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 border border-red-200 dark:border-red-900 text-red-500 dark:text-red-400 rounded-xl text-sm font-medium hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
-                  >
+                  <button onClick={() => setShowDeleteConfirm(true)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 border border-red-200 dark:border-red-900 text-red-500 dark:text-red-400 rounded-xl text-sm font-medium hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors">
                     <Trash2 className="w-4 h-4" />
                     Delete My Account
                   </button>
@@ -463,17 +446,12 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
                     </div>
                     {deleteError && <p className="text-xs text-red-500 mb-2">{deleteError}</p>}
                     <div className="flex gap-2">
-                      <button
-                        onClick={() => { setShowDeleteConfirm(false); setDeleteError(""); }}
-                        className="flex-1 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
-                      >
+                      <button onClick={() => { setShowDeleteConfirm(false); setDeleteError(""); }}
+                        className="flex-1 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
                         Cancel
                       </button>
-                      <button
-                        onClick={handleDeleteAccount}
-                        disabled={deleteLoading}
-                        className="flex-1 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium disabled:opacity-60 transition-colors"
-                      >
+                      <button onClick={handleDeleteAccount} disabled={deleteLoading}
+                        className="flex-1 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-sm font-medium disabled:opacity-60 transition-colors">
                         {deleteLoading ? "Deleting…" : "Yes, delete"}
                       </button>
                     </div>
@@ -490,11 +468,22 @@ export function Sidebar({ selectedConversationId, onSelectConversation }: Sideba
 
 // ── Sub-components ──────────────────────────────────────────────────────────
 
+function MobileTabBtn({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick}
+      className={`flex-1 py-2.5 text-[11px] font-bold tracking-widest transition-colors ${
+        active ? "text-white border-b-2 border-white" : "text-white/50 hover:text-white/80"
+      }`}>
+      {label}
+    </button>
+  );
+}
+
 interface UserRowProps {
   u: DBUser;
   isContact: boolean;
   isFriend: boolean;
-  online: boolean;
+  online: boolean | undefined;
   onChat: () => void;
   onAdd: () => void;
   adding: boolean;
@@ -518,11 +507,8 @@ function UserRow({ u, isFriend, online, onChat, onAdd, adding }: UserRowProps) {
           <Check className="w-3.5 h-3.5" /> Contact
         </span>
       ) : (
-        <button
-          onClick={onAdd}
-          disabled={adding}
-          className="flex items-center gap-1 text-xs bg-[#128C7E] hover:bg-[#0f7066] text-white px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-50 flex-shrink-0 transition-colors"
-        >
+        <button onClick={onAdd} disabled={adding}
+          className="flex items-center gap-1 text-xs bg-[#128C7E] hover:bg-[#0f7066] text-white px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-50 flex-shrink-0 transition-colors">
           {adding ? "…" : <><Plus className="w-3 h-3" />Add</>}
         </button>
       )}
