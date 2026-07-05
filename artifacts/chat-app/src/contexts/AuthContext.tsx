@@ -23,7 +23,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const fetchDbUser = async (userId: string) => {
     const { data } = await supabase.from("users").select("*").eq("id", userId).single();
-    setDbUser(data);
+    setDbUser(data ?? null);
+    return data ?? null;
   };
 
   const refreshUser = async () => {
@@ -46,7 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       fetchDbUser(session.user.id).finally(() => setLoading(false));
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       // TOKEN_REFRESHED failure or explicit sign-out → clear everything
       if (event === "SIGNED_OUT" || !session) {
         setSession(null);
@@ -56,7 +57,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       setSession(session);
       setUser(session.user);
-      fetchDbUser(session.user.id);
+      // On fresh sign-up the profile INSERT happens AFTER this event fires,
+      // so fetchDbUser may return null. Retry up to 3× with back-off.
+      const profile = await fetchDbUser(session.user.id);
+      if (!profile && event === "SIGNED_IN") {
+        for (const delay of [800, 1500, 3000]) {
+          await new Promise(r => setTimeout(r, delay));
+          const retry = await fetchDbUser(session.user.id);
+          if (retry) break;
+        }
+      }
     });
 
     return () => subscription.unsubscribe();

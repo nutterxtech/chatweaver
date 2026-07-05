@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { MessageCircle, Eye, EyeOff } from "lucide-react";
 
@@ -28,6 +29,7 @@ export default function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
+  const { refreshUser } = useAuth();
 
   const loginForm = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
@@ -110,10 +112,13 @@ export default function AuthPage() {
       sent_requests: [],
     });
 
-    setLoading(false);
     if (userError) {
+      setLoading(false);
       toast({ title: "Profile setup error", description: userError.message, variant: "destructive" });
     } else {
+      // Re-fetch dbUser now that the row exists — auth state change fired before insert
+      await refreshUser();
+      setLoading(false);
       toast({ title: "Welcome!", description: "Account created successfully." });
     }
   };
