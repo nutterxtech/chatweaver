@@ -92,7 +92,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    // Best-effort server invalidation — ignore errors
+    try { await supabase.auth.signOut(); } catch { /* ignore */ }
+    // Force-clear local state so the UI always responds
+    setSession(null);
+    setUser(null);
+    setDbUser(null);
   };
 
   const deleteAccount = async (): Promise<{ error?: string }> => {
