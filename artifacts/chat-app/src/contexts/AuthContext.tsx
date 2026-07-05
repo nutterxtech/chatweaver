@@ -32,19 +32,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
-      // Stale/invalid token — wipe it so the user lands on login
+    // Safety valve — never stay on loading screen more than 6 s
+    const safetyTimer = setTimeout(() => setLoading(false), 6000);
+
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (error || !session) {
-        await supabase.auth.signOut();
+        // No valid session — go straight to login, no network call needed
         setSession(null);
         setUser(null);
         setDbUser(null);
+        clearTimeout(safetyTimer);
         setLoading(false);
         return;
       }
       setSession(session);
       setUser(session.user);
-      fetchDbUser(session.user.id).finally(() => setLoading(false));
+      fetchDbUser(session.user.id).finally(() => {
+        clearTimeout(safetyTimer);
+        setLoading(false);
+      });
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
