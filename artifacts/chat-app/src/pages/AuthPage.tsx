@@ -49,77 +49,75 @@ export default function AuthPage() {
 
   const handleRegister = async (data: RegisterForm) => {
     setLoading(true);
+    try {
+      // Check uniqueness
+      const { data: existing } = await supabase
+        .from("users")
+        .select("id")
+        .or(`email.eq.${data.email},phone.eq.${data.phone},username.eq.${data.username}`)
+        .limit(1);
 
-    // Check uniqueness of email and phone in users table
-    const { data: existing } = await supabase
-      .from("users")
-      .select("id")
-      .or(`email.eq.${data.email},phone.eq.${data.phone},username.eq.${data.username}`)
-      .limit(1);
-
-    if (existing?.length) {
-      setLoading(false);
-      toast({ title: "Account exists", description: "Email, phone, or username already taken.", variant: "destructive" });
-      return;
-    }
-
-    // Create Supabase auth user
-    const { data: authData, error } = await supabase.auth.signUp({
-      email: data.email,
-      password: data.password,
-    });
-
-    if (error) {
-      setLoading(false);
-      // Give a friendly message for the most common errors
-      let description = error.message;
-      if (error.message.includes("rate limit") || error.message.includes("429")) {
-        description = "Too many sign-up attempts. Please wait a few minutes and try again, or disable email confirmation in your Supabase Auth settings.";
-      } else if (error.message.includes("already registered")) {
-        description = "This email is already registered. Try signing in instead.";
+      if (existing?.length) {
+        toast({ title: "Account exists", description: "Email, phone, or username already taken.", variant: "destructive" });
+        return;
       }
-      toast({ title: "Registration failed", description, variant: "destructive" });
-      return;
-    }
 
-    if (!authData.user) {
-      setLoading(false);
-      toast({ title: "Registration failed", description: "No user returned. Please try again.", variant: "destructive" });
-      return;
-    }
-
-    // If email confirmation is required, session will be null — inform the user
-    if (!authData.session) {
-      setLoading(false);
-      toast({
-        title: "Check your email",
-        description: "A confirmation link has been sent to " + data.email + ". Click it to activate your account.",
+      // Create Supabase auth user
+      const { data: authData, error } = await supabase.auth.signUp({
+        email: data.email,
+        password: data.password,
       });
-      return;
-    }
 
-    // Insert into users table (password field kept as placeholder — auth is handled by Supabase Auth)
-    const { error: userError } = await supabase.from("users").insert({
-      id: authData.user.id,
-      name: data.name,
-      username: data.username,
-      email: data.email,
-      phone: data.phone,
-      password: "supabase_auth", // placeholder — real auth uses Supabase Auth, not this field
-      status: "Hey there! I am using WhatsChat.",
-      friends: [],
-      friend_requests: [],
-      sent_requests: [],
-    });
+      if (error) {
+        let description = error.message;
+        if (error.message.includes("rate limit") || error.message.includes("429")) {
+          description = "Too many attempts. Wait a few minutes, or go to Supabase → Authentication → Settings and disable email confirmation.";
+        } else if (error.message.includes("already registered")) {
+          description = "This email is already registered. Try signing in instead.";
+        }
+        toast({ title: "Registration failed", description, variant: "destructive" });
+        return;
+      }
 
-    if (userError) {
+      if (!authData.user) {
+        toast({ title: "Registration failed", description: "No user returned. Please try again.", variant: "destructive" });
+        return;
+      }
+
+      // Email confirmation required — session is null
+      if (!authData.session) {
+        toast({
+          title: "Check your email",
+          description: "A confirmation link was sent to " + data.email + ". To skip this, go to Supabase → Auth → Settings → disable \"Enable email confirmations\".",
+        });
+        return;
+      }
+
+      // Insert profile row
+      const { error: userError } = await supabase.from("users").insert({
+        id: authData.user.id,
+        name: data.name,
+        username: data.username,
+        email: data.email,
+        phone: data.phone,
+        password: "supabase_auth",
+        status: "Hey there! I am using WhatsChat.",
+        friends: [],
+        friend_requests: [],
+        sent_requests: [],
+      });
+
+      if (userError) {
+        toast({ title: "Profile setup error", description: userError.message, variant: "destructive" });
+      } else {
+        await refreshUser();
+        toast({ title: "Welcome!", description: "Account created successfully." });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unexpected error. Please try again.";
+      toast({ title: "Registration error", description: msg, variant: "destructive" });
+    } finally {
       setLoading(false);
-      toast({ title: "Profile setup error", description: userError.message, variant: "destructive" });
-    } else {
-      // Re-fetch dbUser now that the row exists — auth state change fired before insert
-      await refreshUser();
-      setLoading(false);
-      toast({ title: "Welcome!", description: "Account created successfully." });
     }
   };
 
