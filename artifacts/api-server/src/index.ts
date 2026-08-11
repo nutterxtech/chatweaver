@@ -1,32 +1,35 @@
-import app from "./app";
+import express, { type Express } from "express";
+import cors from "cors";
+import pinoHttp from "pino-http";
+import router from "./routes";
 import { logger } from "./lib/logger";
-import { cleanupExpiredMessages } from "./lib/mongo";
 
-const rawPort = process.env["PORT"];
+const app: Express = express();
 
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
+app.use(
+  pinoHttp({
+    logger,
+    serializers: {
+      req(req) {
+        return {
+          id: req.id,
+          method: req.method,
+          url: req.url?.split("?")[0],
+        };
+      },
+      res(res) {
+        return {
+          statusCode: res.statusCode,
+        };
+      },
+    },
+  }),
+);
 
-const port = Number(rawPort);
+app.use(cors());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-if (Number.isNaN(port) || port <= 0) {
-  throw new Error(`Invalid PORT value: "${rawPort}"`);
-}
+app.use("/api", router);
 
-void cleanupExpiredMessages();
-const cleanupTimer = setInterval(() => {
-  void cleanupExpiredMessages();
-}, 60 * 60 * 1000);
-cleanupTimer.unref();
-
-app.listen(port, (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
-  }
-
-  logger.info({ port }, "Server listening");
-});
+export default app;
